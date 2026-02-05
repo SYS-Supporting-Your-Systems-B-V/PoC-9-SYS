@@ -1,5 +1,5 @@
 mach2.disyepd.com {
-  handle_path /Oauth/* {
+  handle_path /nuts-oauth2/* {
     reverse_proxy nuts-node:8083
   }
   handle_path /notifiedpull/* {

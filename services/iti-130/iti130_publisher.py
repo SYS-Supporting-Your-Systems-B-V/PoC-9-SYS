@@ -1209,6 +1209,22 @@ def _init_sqlite_schema(conn: Connection, seed: bool = True, reset_seed: bool = 
         "https://mach2.disyepd.com/notifiedpull/fhir", "FHIR API", "+31-20-0000000", "fhir@demo.invalid",
         "2020-01-01", None, 1, now
     ))
+    # OAuth endpoint for the Authentication Server (nuts-node)
+    conn.exec_driver_sql("""INSERT INTO tblEndpoint (
+        endpointkey, kliniekkey, locatiekey, afdelingkey,
+        status, connectionTypeSystemUri, connectionTypeCode, connectionTypeDisplay,
+        payloadTypeSystemUri, payloadTypeCode, payloadTypeDisplay, payloadMimeType,
+        adres, naam, telefoon, email,
+        ingangsdatum, einddatum, actief, LaatstGewijzigdOp
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+        901, 1, None, None,
+        "active", ENDPOINT_CONN_SYSTEM, "direct-project", "Direct Project",
+        NL_GF_DATA_EXCHANGE_CAPABILITIES_SYSTEM, "Nuts-OAuth", "Nuts OAuth endpoint",
+        None,
+        "https://mach2.disyepd.com/nuts-oauth2", "Nuts OAuth2", None, None,
+        "2020-01-01", None, 1, now
+    ))
+
     conn.exec_driver_sql("""INSERT INTO tblRoldefinitie (
         roldefinitiekey, rolCodeSystemUri, rolCode, rolDisplay, LaatstGewijzigdOp
     ) VALUES (?,?,?,?,?)""", (1, "http://terminology.hl7.org/CodeSystem/practitioner-role", "doctor", "Doctor", now))
