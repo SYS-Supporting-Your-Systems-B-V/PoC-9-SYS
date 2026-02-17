@@ -1,0 +1,17 @@
+strictmode: false
+# url: http://localhost:8081
+url: https://mach2.disyepd.com/nuts-oauth2
+datadir: /data
+didmethods: [web]
+
+http:
+  public:
+    address: :8081
+  internal:
+    address: :8080
+
+crypto:
+  storage: fs
+
+policy:
+  directory: ./policies

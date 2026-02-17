@@ -1,0 +1,29 @@
+Beginnen met dit op te zetten, niet nodig om naar de soort data te kijken.
+Step 2: Sender sends notification
+https://github.com/nuts-foundation/nl-generic-functions-ig/discussions/73
+
+
+Eerst DID aanmaken via nuts-node
+curl --location 'localhost:8083/internal/vdr/v2/subject' \
+--header 'Content-Type: application/json' \
+--data '{"subject": "00700700"}'
+Vervolgens fake UZI cert aanmaken
+Daarna x.509 creeren via go-didx509-toolkit:1.1.0 vc
+https://wiki.nuts.nl/books/implementing-a-nuts-use-case/page/1-create-organization-identity
+Load X509Credential into organization wallet
+https://wiki.nuts.nl/link/145#bkmrk-using-api
+curl --location 'localhost:8083/internal/vcr/v2/holder/00700700/vc' \
+--header 'Content-Type: application/json' \
+--data 'INSERT-X.509-TOKEN'
+
+
+Sender finds correct OAuth-endpoint-url of Receiver via found HealthcareService. Endpoint.payloadType = "Nuts-OAuth"
+https://wiki.nuts.nl/books/implementing-a-nuts-use-case/page/requesting-access-outbound
+
+
+
+Voeg token introspection to via nuts-node zodat alleen valid tokens verder kunnen.
+https://caddyserver.com/docs/json/apps/http/servers/routes/handle/oauth2_token_introspection/
+
+
+Voor het doen van een auth request kan de POST naar het interne nuts-node API gemaakt worden, deze zal het doorsturen

@@ -454,7 +454,7 @@
             <div class="row">
               <label>
                 Client directory base URL
-                <input id="client-base" type="text" value="http://localhost:8081/fhir">
+                <input id="client-base" type="text" value="http://10.10.10.198:8081/fhir">
               </label>
               <button id="client-load">Load mCSD resources</button>
             </div>
@@ -465,7 +465,7 @@
             <div class="row">
               <label>
                 Admin directory base URL
-                <input id="admin-base" type="text" value="http://localhost:8080/fhir">
+                <input id="admin-base" type="text" value="http://10.10.10.198:8080/fhir">
               </label>
               <button id="admin-load">Load mCSD resources</button>
             </div>
@@ -1621,6 +1621,7 @@
       const ADMIN_ALLOWED_HOSTS = new Set([
         "localhost",
         "127.0.0.1",
+        "10.10.10.198",
         "mach2.disyepd.com",
       ]);
 

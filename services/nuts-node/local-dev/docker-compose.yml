@@ -1,0 +1,28 @@
+services:
+  nuts-node:
+    image: nutsfoundation/nuts-node:latest
+    container_name: nuts-node
+    environment:
+      NUTS_CONFIGFILE: /opt/nuts/nuts.yaml
+    ports:
+      - "8083:8080"  # internal (dev only)
+      - "8084:8081"  # public
+    volumes:
+      - ./nuts.yaml:/opt/nuts/nuts.yaml:ro
+      - ./policies:/opt/nuts/policies:ro
+      - nuts-data:/data
+    networks:
+      - mcsd_update_client_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  nuts-data:
+
+networks:
+  mcsd_update_client_net:
+    external: true
+    name: mcsd_update_client_net

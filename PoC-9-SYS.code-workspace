@@ -2,6 +2,12 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "../yob_certificates"
+		},
+		{
+			"path": "../nuts-node"
 		}
 	],
 	"settings": {}
