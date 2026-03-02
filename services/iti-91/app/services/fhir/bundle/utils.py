@@ -1,4 +1,7 @@
 from typing import List
+from urllib.parse import unquote
+
+from yarl import URL
 from fhir.resources.R4B.bundle import Bundle, BundleEntry
 
 from app.models.fhir.types import HttpValidVerbs
@@ -14,15 +17,56 @@ HTTP_VERBS: List[HttpValidVerbs] = [
 ]
 
 
+def _resource_from_path(parts: list[str]) -> tuple[str | None, str | None]:
+    if not parts:
+        return None, None
+    if "_history" in parts:
+        i = parts.index("_history")
+        if i >= 2:
+            return parts[i - 2], parts[i - 1]
+        return None, None
+    if len(parts) >= 2:
+        return parts[-2], parts[-1]
+    return None, None
+
+
 def get_resource_from_reference(reference: str) -> tuple[str | None, str | None]:
     """
-    Returns a split resource from a reference (e.g. "Patient/123" -> ("Patient", "123"))
+    Returns a split resource from a reference (e.g. "Patient/123" -> ("Patient", "123")).
+    Also supports absolute URLs and query-style references like "Endpoint?_source=...".
     """
-    parts = reference.split("/")
-    if len(parts) < 2:
+    if not reference:
         return None, None
 
-    return parts[-2], parts[-1]
+    ref = reference.strip()
+
+    try:
+        if ref.startswith("http://") or ref.startswith("https://"):
+            url = URL(ref)
+            parts = [p for p in url.path.split("/") if p]
+            return _resource_from_path(parts)
+
+        if "?" in ref:
+            url = URL(ref)
+            parts = [p for p in url.path.split("/") if p]
+            res_type, res_id = _resource_from_path(parts)
+            if res_type and res_id:
+                return res_type, res_id
+
+            res_type = parts[-1] if parts else None
+            query = url.query
+            if "_id" in query and query["_id"]:
+                return res_type, str(query["_id"])
+            if "_source" in query and query["_source"]:
+                source_ref = unquote(str(query["_source"]))
+                return get_resource_from_reference(source_ref)
+
+            return None, None
+    except Exception:
+        pass
+
+    parts = [p for p in ref.split("/") if p]
+    return _resource_from_path(parts)
 
 
 def get_resource_type_and_id_from_entry(entry: BundleEntry) -> tuple[str, str]:
