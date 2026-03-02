@@ -7,13 +7,22 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(scope="session")
 def appmod():
-    # Configure main.py to use the public HAPI FHIR R4 server
+    # Configure app.py to use the public HAPI FHIR R4 server
     os.environ["MCSD_BASE"] = "https://hapi.fhir.org/baseR4"
     os.environ["UPSTREAM_TIMEOUT"] = "15"
-    # Ensure a fresh import so env vars are picked up
-    if "main" in sys.modules:
-        del sys.modules["main"]
-    return importlib.import_module("main")
+    # Ensure a fresh import so env vars are picked up.
+    candidates = ("app", "main", "mcsd.app")
+    for name in candidates:
+        if name in sys.modules:
+            del sys.modules[name]
+
+    for name in candidates:
+        try:
+            return importlib.import_module(name)
+        except ModuleNotFoundError:
+            continue
+
+    pytest.fail(f"Could not import any app module candidate: {candidates}")
 
 @pytest.fixture(scope="session")
 def client(appmod):

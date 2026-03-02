@@ -1,4 +1,4 @@
-# main.py
+# app.py
 import base64
 import copy
 import hashlib
@@ -28,17 +28,18 @@ from urllib.parse import urlparse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import Field, BaseModel
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s", stream=sys.stdout)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("mcsd.app")
 audit_logger = logging.getLogger("mcsd.audit")
-
-# Load settings after logging is configured so .env load logs are visible.
-from configs import settings, ALLOW_ORIGINS, ALLOWED_HOSTS
+APP_ROOT = Path(__file__).resolve().parent
 REQUEST_ID_CTX: ContextVar[str] = ContextVar("request_id", default="")
 UP_SEQ_CTX: ContextVar[int] = ContextVar("up_seq", default=0)
+_ENV_FILE_NAME = os.getenv("MCSD_ENV_FILE", ".env")
+_ENV_FILE_PATH = (Path(__file__).parent / _ENV_FILE_NAME).resolve()
 def _fmt_rid(rid: str) -> str:
     if not rid:
         return "-"
@@ -51,6 +52,58 @@ def _fmt_up_url(url: httpx.URL) -> str:
     except Exception:
         return str(url)
 
+class Settings(BaseSettings):
+    base_url: str = Field("https://example-fhir/mcsd", validation_alias="MCSD_BASE")
+    upstream_timeout: float = Field(30.0, validation_alias="MCSD_UPSTREAM_TIMEOUT")
+    bearer_token: Optional[str] = Field(None, validation_alias="MCSD_BEARER_TOKEN")
+    verify_tls: bool = Field(True, validation_alias="MCSD_VERIFY_TLS")
+    ca_certs_file: Optional[str] = Field(None, validation_alias="MCSD_CA_CERTS_FILE")
+    allow_origins: List[str] = Field(["*"], validation_alias="MCSD_ALLOW_ORIGINS")
+    allowed_hosts: List[str] = Field(["*"], validation_alias="MCSD_ALLOWED_HOSTS")
+    api_key: Optional[str] = Field(None, validation_alias="MCSD_API_KEY")
+    sender_ura: Optional[str] = Field(None, validation_alias="MCSD_SENDER_URA")
+    sender_name: Optional[str] = Field(None, validation_alias="MCSD_SENDER_NAME")
+    sender_uzi_sys: Optional[str] = Field(None, validation_alias="MCSD_SENDER_UZI_SYS")
+    sender_system_name: Optional[str] = Field(None, validation_alias="MCSD_SENDER_SYSTEM_NAME")
+    sender_bgz_base: Optional[str] = Field(None, validation_alias="MCSD_SENDER_BGZ_BASE")
+    audit_hmac_key: Optional[str] = Field(None, validation_alias="MCSD_AUDIT_HMAC_KEY")
+    allow_task_preview_in_production: bool = Field(False, validation_alias="MCSD_ALLOW_TASK_PREVIEW_IN_PRODUCTION")
+    notifiedpull_enabled: bool = Field(True, validation_alias="MCSD_NOTIFIEDPULL_ENABLED")
+    log_level: str = Field("INFO", validation_alias="MCSD_LOG_LEVEL")
+    is_production: bool = Field(False, validation_alias="MCSD_IS_PRODUCTION")
+    httpx_max_connections: int = Field(50, validation_alias="MCSD_HTTPX_MAX_CONNECTIONS")
+    httpx_max_keepalive_connections: int = Field(20, validation_alias="MCSD_HTTPX_MAX_KEEPALIVE_CONNECTIONS")
+    max_query_params: int = Field(50, validation_alias="MCSD_MAX_QUERY_PARAMS")
+    max_query_value_length: int = Field(256, validation_alias="MCSD_MAX_QUERY_VALUE_LENGTH")
+    max_query_param_values: int = Field(20, validation_alias="MCSD_MAX_QUERY_PARAM_VALUES")
+    capability_cache_ttl_seconds: int = Field(600, validation_alias="MCSD_CAPABILITY_CACHE_TTL_SECONDS")
+    debug_dump_json: bool = Field(False, validation_alias="MCSD_DEBUG_DUMP_JSON")
+    debug_dump_dir: str = Field("/tmp/mcsd-debug", validation_alias="MCSD_DEBUG_DUMP_DIR")
+    debug_dump_redact: bool = Field(True, validation_alias="MCSD_DEBUG_DUMP_REDACT")
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE_PATH),
+        case_sensitive=False,
+    )
+
+# Load configured env file early so its values (like MCSD_DEBUG_DUMP_DIR) are applied consistently.
+try:
+    from dotenv import dotenv_values, load_dotenv
+    _dotenv_path = _ENV_FILE_PATH
+    _is_prod_raw = os.getenv("MCSD_IS_PRODUCTION")
+    if _is_prod_raw is None and _dotenv_path.exists():
+        try:
+            _is_prod_raw = (dotenv_values(str(_dotenv_path)).get("MCSD_IS_PRODUCTION") or "")
+        except Exception:
+            _is_prod_raw = ""
+    _is_prod = str(_is_prod_raw or "").strip().lower() in ("1", "true", "yes", "on")
+    if _dotenv_path.exists():
+        load_dotenv(dotenv_path=str(_dotenv_path), override=not _is_prod)
+        logger.info("[mCSD] env loaded file=%s override=%s", str(_dotenv_path), "on" if (not _is_prod) else "off")
+    else:
+        logger.info("[mCSD] env file not found file=%s", str(_dotenv_path))
+except Exception:
+    logger.exception("[mCSD] env load failed")
+settings = Settings()
 def _audit_hash(value: str | None) -> str | None:
     secret = (settings.audit_hmac_key or "").encode("utf-8")
     raw = (value or "").strip()
@@ -164,7 +217,7 @@ logger.setLevel(settings.log_level.upper())
 
 async def on_startup():
     _setup_file_logging()
-    logger.info("[mCSD] pydantic env_file=%s", str((Path(__file__).parent / ".env").resolve()))
+    logger.info("[mCSD] pydantic env_file=%s", str(_ENV_FILE_PATH))
     logger.info(
         "[mCSD] base=%s timeout=%ss auth=%s",
         settings.base_url,
@@ -179,19 +232,23 @@ async def on_startup():
         except Exception:
             logger.exception("[mCSD] debug dump JSON=on but cannot create dir=%s", str(out_dir))
     if settings.is_production:
-        if ALLOW_ORIGINS == ["*"]:
+        if settings.allow_origins == ["*"]:
             raise RuntimeError("MCSD_ALLOW_ORIGINS staat op '*' in productie; stel expliciete origins in.")
-        if ALLOWED_HOSTS == ["*"]:
+        if settings.allowed_hosts == ["*"]:
             raise RuntimeError("MCSD_ALLOWED_HOSTS staat op '*' in productie; stel expliciete hosts in.")
         if not settings.verify_tls:
             raise RuntimeError("MCSD_VERIFY_TLS staat uit in productie; dit is onveilig.")
 
     # PoC 9: valideer BgZ templates (fail fast) om runtime KeyErrors te voorkomen.
-    try:
-        _validate_notification_task_template()
-        _validate_workflow_task_template()
-    except Exception as exc:
-        raise RuntimeError(f"BgZ template validatie faalde: {exc}")
+    if settings.notifiedpull_enabled:
+        try:
+            _validate_notification_task_template()
+            _validate_workflow_task_template()
+        except Exception as exc:
+            raise RuntimeError(f"BgZ template validatie faalde: {exc}")
+
+
+
 
 
 async def _httpx_log_request(request: httpx.Request):
@@ -350,19 +407,26 @@ def _make_error_payload(
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=ALLOWED_HOSTS,
+    allowed_hosts=settings.allowed_hosts,
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOW_ORIGINS,
+    allow_origins=settings.allow_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.add_middleware(RequestIdMiddleware)
 
-@app.get("/", include_in_schema=False)
-async def index():
-    return FileResponse(Path(__file__).parent / "mcsd_zoek_PoC_9.html")
+
+def _serve_html_page(path: Path) -> FileResponse:
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"HTML page not found: {path.name}")
+    return FileResponse(path, media_type="text/html; charset=utf-8")
+
+
+@app.get("/mscd_zoek/", response_class=FileResponse, include_in_schema=False)
+def mscd_zoek_page():
+    return _serve_html_page(APP_ROOT / "mcsd_zoek.html")
 
 
 @app.exception_handler(HTTPException)
@@ -420,6 +484,15 @@ def verify_api_key(x_api_key: str | None = Header(default=None)):
     if settings.api_key and x_api_key != settings.api_key:
         raise HTTPException(status_code=401, detail="Ongeldige API key.")
 
+def verify_notifiedpull_enabled():
+    if not settings.notifiedpull_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "reason": "notifiedpull_disabled",
+                "message": "BgZ Notified Pull functionaliteit is uitgeschakeld op deze server (MCSD_NOTIFIEDPULL_ENABLED=false).",
+            },
+        )
 # Whitelist aligned with ITI-90 (commonly used parameters per resource)
 ALLOWED_PARAMS = {
     "Practitioner": {"active", "identifier", "name", "given", "family"},
@@ -3679,8 +3752,6 @@ def _determine_task_routing(
         task_owner_ref = effective_org_ref_norm or receiver_org_ref_norm or None
         task_owner_display = effective_org_name
     return task_owner_ref, task_owner_display, task_location_ref, task_location_display
-
-
 def _build_bgz_notification_task(
     *,
     sender_ura: str,
@@ -4035,7 +4106,7 @@ async def _upsert_workflow_task_to_sender_bgz(
                 },
             },
         )
-@app.post("/bgz/load-data", dependencies=[Depends(verify_api_key)])
+@app.post("/bgz/load-data", dependencies=[Depends(verify_api_key), Depends(verify_notifiedpull_enabled)])
 async def bgz_load_data(
     hapi_base: str = Query(..., description="Target HAPI FHIR server base URL"),
     sender_ura: str = Query(..., description="Sender organization URA"),
@@ -4099,7 +4170,7 @@ class BgzPreflightRequest(BaseModel):
     include_oauth: bool = Field(False, description="(Debug/demo) Include OAuth/NUTS endpoints in the capability mapping response.")
 
 
-@app.post("/bgz/preflight", dependencies=[Depends(verify_api_key)])
+@app.post("/bgz/preflight", dependencies=[Depends(verify_api_key), Depends(verify_notifiedpull_enabled)])
 async def bgz_preflight(payload: BgzPreflightRequest = Body(...)):
     """Preflight check before sending a BgZ notification Task.
 
@@ -4116,6 +4187,19 @@ async def bgz_preflight(payload: BgzPreflightRequest = Body(...)):
             detail={"reason": "misconfigured", "message": "MCSD_SENDER_URA en/of MCSD_SENDER_NAME is niet ingesteld."},
         )
 
+    sender_uzi_sys = (settings.sender_uzi_sys or "").strip()
+    sender_system_name = (settings.sender_system_name or "").strip()
+    if not sender_uzi_sys or not sender_system_name:
+        raise HTTPException(
+            status_code=500,
+            detail={"reason": "misconfigured", "message": "MCSD_SENDER_UZI_SYS en/of MCSD_SENDER_SYSTEM_NAME is niet ingesteld."},
+        )
+    sender_bgz_base_norm = _normalize_fhir_base(settings.sender_bgz_base or "")
+    if not sender_bgz_base_norm:
+        raise HTTPException(
+            status_code=500,
+            detail={"reason": "misconfigured", "message": "MCSD_SENDER_BGZ_BASE is niet ingesteld; dit is nodig om de Workflow Task te hosten."},
+        )
     receiver_org_ref = (payload.receiver_org_ref or "").strip() or None
     receiver_target_ref = (payload.receiver_target_ref or "").strip()
     receiver_notification_endpoint_id = (payload.receiver_notification_endpoint_id or "").strip() or None
@@ -4304,7 +4388,7 @@ async def bgz_preflight(payload: BgzPreflightRequest = Body(...)):
 
 @app.post(
     "/bgz/task-preview",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_api_key), Depends(verify_notifiedpull_enabled)],
     response_model=BgzTaskPreviewResponseModel,
 )
 async def bgz_task_preview(payload: BgzNotifyRequest = Body(...)):
@@ -4427,7 +4511,7 @@ async def bgz_task_preview(payload: BgzNotifyRequest = Body(...)):
 
 @app.post(
     "/bgz/notify",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_api_key), Depends(verify_notifiedpull_enabled)],
     response_model=BgzNotifyResponseModel,
 )
 async def bgz_notify(payload: BgzNotifyRequest = Body(...)):

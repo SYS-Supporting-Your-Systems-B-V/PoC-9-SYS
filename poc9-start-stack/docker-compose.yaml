@@ -47,6 +47,8 @@ services:
     build:
       context: ../services/iti-90
       dockerfile: Dockerfile
+    env_file:
+      - ../services/iti-90/.env.Docker
     ports:
       - "8000:8000"
     volumes:

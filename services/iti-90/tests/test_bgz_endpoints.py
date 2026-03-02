@@ -1,5 +1,6 @@
 # tests/test_bgz_endpoints.py
 
+import base64
 import importlib
 import json
 import os
@@ -71,6 +72,8 @@ def assert_task_matches_notification_template(
     template: Dict[str, Any],
     sender_ura: str,
     sender_name: str,
+    sender_uzi_sys: str,
+    sender_system_name: str,
     receiver_ura: str,
     receiver_name: str,
     patient_bsn: str,
@@ -90,7 +93,7 @@ def assert_task_matches_notification_template(
     """
 
     # --- Ongewijzigd t.o.v. template ---
-    for key in ("resourceType", "id", "meta", "status", "intent", "code", "input"):
+    for key in ("resourceType", "id", "meta", "status", "intent", "code"):
         assert task.get(key) == template.get(key), f"Veld '{key}' wijkt af van template"
 
     # --- groupIdentifier / identifier: UUID URNs maar met zelfde system ---
@@ -126,7 +129,9 @@ def assert_task_matches_notification_template(
     assert 364 <= delta_days <= 366, f"restriction.end lijkt geen 365 dagen na authoredOn ({delta_days} dagen)"
 
     # --- Sender (requester.onBehalfOf) ---
-    assert task["requester"]["agent"] == template["requester"]["agent"], "requester.agent moet uit template komen"
+    assert task["requester"]["agent"]["identifier"]["system"] == template["requester"]["agent"]["identifier"]["system"]
+    assert task["requester"]["agent"]["identifier"]["value"] == sender_uzi_sys
+    assert task["requester"]["agent"]["display"] == sender_system_name
     assert task["requester"]["onBehalfOf"]["identifier"]["system"] == template["requester"]["onBehalfOf"]["identifier"]["system"]
     assert task["requester"]["onBehalfOf"]["identifier"]["value"] == sender_ura
     assert task["requester"]["onBehalfOf"]["display"] == sender_name
@@ -162,6 +167,33 @@ def assert_task_matches_notification_template(
         assert task.get("description") == description
     else:
         assert "description" not in task
+
+    # --- Task.input ---
+    template_inputs = template.get("input") or []
+    task_inputs = task.get("input") or []
+    assert isinstance(task_inputs, list) and len(task_inputs) == len(template_inputs), "input-lijst wijkt af"
+
+    def _task_input_by_code(inputs: List[Dict[str, Any]], code: str) -> Optional[Dict[str, Any]]:
+        for inp in inputs:
+            coding = (((inp or {}).get("type") or {}).get("coding") or [])
+            if not isinstance(coding, list):
+                continue
+            for c in coding:
+                if (c or {}).get("code") == code:
+                    return inp
+        return None
+
+    auth_input = _task_input_by_code(task_inputs, "authorization-base")
+    assert auth_input is not None, "input authorization-base ontbreekt"
+    auth_value = (auth_input or {}).get("valueString")
+    assert isinstance(auth_value, str) and auth_value.strip(), "authorization-base valueString ontbreekt"
+    assert auth_value != "DYNAMIC:authorization_base", "authorization-base placeholder is niet vervangen"
+    decoded = base64.b64decode(auth_value).decode()
+    uuid.UUID(decoded)
+
+    get_wf_input = _task_input_by_code(task_inputs, "get-workflow-task")
+    assert get_wf_input is not None, "input get-workflow-task ontbreekt"
+    assert get_wf_input.get("valueBoolean") is True
 
 
 @dataclass
@@ -209,8 +241,15 @@ class FakeHttpClient:
         self.post_calls.append({"url": url, "json": json, "headers": headers or {}})
         return self._next_post_response
 
-    async def get(self, url: str, *, headers: Optional[Dict[str, str]] = None, timeout: Optional[float] = None):
-        self.get_calls.append({"url": url, "headers": headers or {}, "timeout": timeout})
+    async def get(
+        self,
+        url: str,
+        *,
+        headers: Optional[Dict[str, str]] = None,
+        timeout: Optional[float] = None,
+        params: Optional[Dict[str, Any]] = None,
+    ):
+        self.get_calls.append({"url": url, "headers": headers or {}, "timeout": timeout, "params": params or {}})
         return self._next_get_response
 
     async def aclose(self) -> None:
@@ -230,7 +269,9 @@ def appmod(monkeypatch):
     monkeypatch.setattr(mod.settings, "api_key", "test-api-key", raising=False)
     monkeypatch.setattr(mod.settings, "sender_ura", "12345678", raising=False)
     monkeypatch.setattr(mod.settings, "sender_name", "Huisartsenpraktijk De Vries", raising=False)
-    monkeypatch.setattr(mod.settings, "sender_bgz_base", None, raising=False)
+    monkeypatch.setattr(mod.settings, "sender_uzi_sys", "00009876543", raising=False)
+    monkeypatch.setattr(mod.settings, "sender_system_name", "SYS EPD POC9", raising=False)
+    monkeypatch.setattr(mod.settings, "sender_bgz_base", "https://sender.example/fhir", raising=False)
     monkeypatch.setattr(mod.settings, "is_production", False, raising=False)
     monkeypatch.setattr(mod.settings, "allow_task_preview_in_production", True, raising=False)
 
@@ -307,6 +348,9 @@ def test_bgz_preflight_location_routing_and_metadata_probe_ok(appmod, client, mo
         DummyResponse(
             200,
             {
+                "identifier": [
+                    {"system": "http://fhir.nl/fhir/NamingSystem/ura", "value": "87654321"},
+                ],
                 "resourceType": "CapabilityStatement",
                 "rest": [
                     {
@@ -372,6 +416,9 @@ def test_bgz_preflight_not_ready_when_metadata_has_no_task_create(appmod, client
         DummyResponse(
             200,
             {
+                "identifier": [
+                    {"system": "http://fhir.nl/fhir/NamingSystem/ura", "value": "87654321"},
+                ],
                 "resourceType": "CapabilityStatement",
                 "rest": [
                     {
@@ -417,7 +464,18 @@ def test_bgz_preflight_healthcareservice_routing_owner_ref_only(appmod, client, 
     monkeypatch.setattr(appmod, "poc9_msz_capability_mapping", _fake_capability_mapping)
 
     fake = FakeHttpClient()
-    fake.queue_get_response(DummyResponse(200, {"resourceType": "CapabilityStatement", "rest": []}))
+    fake.queue_get_response(
+        DummyResponse(
+            200,
+            {
+                "identifier": [
+                    {"system": "http://fhir.nl/fhir/NamingSystem/ura", "value": "87654321"},
+                ],
+                "resourceType": "CapabilityStatement",
+                "rest": [],
+            },
+        )
+    )
     monkeypatch.setattr(appmod.app.state, "http_client", fake, raising=False)
 
     r = client.post(
@@ -432,7 +490,7 @@ def test_bgz_preflight_healthcareservice_routing_owner_ref_only(appmod, client, 
     body = r.json()
     routing = body["task_routing"]
     assert routing["target_type"] == "HealthcareService"
-    assert routing["owner_ref"] == "HealthcareService/hs-1"
+    assert routing["owner_ref"] == "Organization/org-owner"
     assert routing["location_ref"] is None
 
 
@@ -449,6 +507,7 @@ def test_bgz_task_preview_location_routing_builds_task_from_template(appmod, cli
             "Location/loc-1",
             "Organization/org-fallback",
             "Location",
+            "87654321",
         )
 
     monkeypatch.setattr(appmod, "_resolve_bgz_notify_destination", _fake_resolve)
@@ -482,6 +541,8 @@ def test_bgz_task_preview_location_routing_builds_task_from_template(appmod, cli
         template=template,
         sender_ura="12345678",
         sender_name="Huisartsenpraktijk De Vries",
+        sender_uzi_sys="00009876543",
+        sender_system_name="SYS EPD POC9",
         receiver_ura="87654321",
         receiver_name="Ziekenhuis Oost - Cardiologie",
         patient_bsn="999999990",
@@ -489,10 +550,16 @@ def test_bgz_task_preview_location_routing_builds_task_from_template(appmod, cli
         description="BgZ beschikbaar voor test (locatie)",
         expected_owner_ref="Organization/org-owner",
         expected_owner_display="Ziekenhuis Oost",
-        expected_location_ref="Location/loc-1",
-        expected_location_display="Ziekenhuis Oost - Cardiologie",
+        expected_location_ref=None,
+        expected_location_display=None,
         expected_workflow_task_id=body["workflow_task_id"],
     )
+    ext = next(
+        e for e in (task.get("extension") or [])
+        if (e or {}).get("url") == "http://nuts-foundation.github.io/nl-generic-functions-ig/StructureDefinition/task-stu3-location"
+    )
+    assert ext["valueReference"]["reference"] == "Location/loc-1"
+    assert ext["valueReference"]["display"] == "Ziekenhuis Oost - Cardiologie"
 
 
 def test_bgz_task_preview_healthcareservice_routing_builds_task_from_template(appmod, client, monkeypatch):
@@ -508,6 +575,7 @@ def test_bgz_task_preview_healthcareservice_routing_builds_task_from_template(ap
             "HealthcareService/hs-1",
             "Organization/org-fallback",
             "HealthcareService",
+            "87654321",
         )
 
     monkeypatch.setattr(appmod, "_resolve_bgz_notify_destination", _fake_resolve)
@@ -537,17 +605,25 @@ def test_bgz_task_preview_healthcareservice_routing_builds_task_from_template(ap
         template=template,
         sender_ura="12345678",
         sender_name="Huisartsenpraktijk De Vries",
+        sender_uzi_sys="00009876543",
+        sender_system_name="SYS EPD POC9",
         receiver_ura="87654321",
         receiver_name="Ziekenhuis Oost - Cardiologie",
         patient_bsn="999999990",
         patient_name="Test Patient",
         description="BgZ beschikbaar voor test (service)",
-        expected_owner_ref="HealthcareService/hs-1",
-        expected_owner_display="Ziekenhuis Oost - Cardiologie",
+        expected_owner_ref="Organization/org-owner",
+        expected_owner_display="Ziekenhuis Oost",
         expected_location_ref=None,
         expected_location_display=None,
         expected_workflow_task_id=body["workflow_task_id"],
     )
+    ext = next(
+        e for e in (task.get("extension") or [])
+        if (e or {}).get("url") == "http://nuts-foundation.github.io/nl-generic-functions-ig/StructureDefinition/task-stu3-healthcareservice"
+    )
+    assert ext["valueReference"]["reference"] == "HealthcareService/hs-1"
+    assert ext["valueReference"]["display"] == "Ziekenhuis Oost - Cardiologie"
 
 
 
@@ -564,6 +640,7 @@ def test_bgz_task_preview_generates_workflow_task_id_when_missing(appmod, client
             "Organization/org-1",
             "Organization/org-1",
             "Organization",
+            "87654321",
         )
 
     monkeypatch.setattr(appmod, "_resolve_bgz_notify_destination", _fake_resolve)
@@ -595,6 +672,8 @@ def test_bgz_task_preview_generates_workflow_task_id_when_missing(appmod, client
         template=template,
         sender_ura="12345678",
         sender_name="Huisartsenpraktijk De Vries",
+        sender_uzi_sys="00009876543",
+        sender_system_name="SYS EPD POC9",
         receiver_ura="87654321",
         receiver_name="Ziekenhuis Oost",
         patient_bsn="999999990",
@@ -620,6 +699,7 @@ def test_bgz_notify_posts_task_and_returns_result(appmod, client, monkeypatch):
             "Organization/org-1",
             "Organization/org-1",
             "Organization",
+            "87654321",
         )
 
     monkeypatch.setattr(appmod, "_resolve_bgz_notify_destination", _fake_resolve)
@@ -649,9 +729,18 @@ def test_bgz_notify_posts_task_and_returns_result(appmod, client, monkeypatch):
     assert body["success"] is True
     assert body["target"] == "https://receiver.example/fhir/Task"
     assert body["resolved_receiver_base"] == "https://receiver.example/fhir"
+    assert body["sender_bgz_base"] == "https://sender.example/fhir"
     assert body["task_id"] == "task-123"
     assert body["task_status"] == "requested"
     assert body.get("workflow_task_id") == "wf-777"
+
+    assert len(fake.put_calls) == 1
+    put = fake.put_calls[0]
+    assert put["url"] == "https://sender.example/fhir/Task/wf-777"
+    assert put["headers"].get("Content-Type") == "application/fhir+json"
+    workflow_task = put["json"]
+    assert workflow_task["resourceType"] == "Task"
+    assert workflow_task["id"] == "wf-777"
 
     assert len(fake.post_calls) == 1
     post = fake.post_calls[0]
@@ -664,6 +753,8 @@ def test_bgz_notify_posts_task_and_returns_result(appmod, client, monkeypatch):
         template=template,
         sender_ura="12345678",
         sender_name="Huisartsenpraktijk De Vries",
+        sender_uzi_sys="00009876543",
+        sender_system_name="SYS EPD POC9",
         receiver_ura="87654321",
         receiver_name="Ziekenhuis Oost",
         patient_bsn="999999990",
