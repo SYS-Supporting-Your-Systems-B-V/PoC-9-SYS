@@ -1,36 +1,99 @@
-# mCSD Update Client
+# PoC-9-SYS
 
-This app is the mCSD (Mobile Care Service Discovery) Update Client and is part of
-the 'Generieke Functies, lokalisatie en addressering' project of the Ministry of Health, Welfare and Sport of the Dutch government. The purpose of this application is
-to perform updates on [mCSD Supported Resources](https://profiles.ihe.net/ITI/mCSD/index.html). The update uses HTTP as a basis for CRUD operations and operates regardless of
-the FHIR store type.
+This repository contains reference implementations for mCSD-based workflows in the
+"Generieke Functies, lokalisatie en addressering" context, covering ITI-90,
+ITI-91, and ITI-130 in one integrated PoC setup.
 
 > [!CAUTION]
-> This project is a **reference implementation** for the [ITI-91: Request Care Services Update](https://profiles.ihe.net/ITI/mCSD/ITI-91.html) transaction.
+> This repository is a **reference implementation**. It is **NOT** intended for
+> production use.
 
-## Reference Implementation
+## What is in this repository
 
-This codebase serves as an example of how the mCSD ITI-91 update mechanism can be implemented. It is **NOT** intended for production use.
+- `services/iti-91`: ITI-91 Request Care Services Update service
+- `services/iti-130`: ITI-130 Care Services Feed publisher
+- `services/iti-90`: ITI-90 address book proxy (PoC-focused)
+- `poc9-start-stack`: Docker Compose stack to run the full PoC locally
 
-### Purpose
+## IHE transaction scope (all are in scope)
 
-- Demonstrate mCSD system communication patterns
-- Support documentation and proof-of-concept development
-- Enable basic interoperability testing
+This repository is designed around these three IHE mCSD transactions:
 
-### Use Cases
+- [ITI-90: Find Matching Care Services](https://profiles.ihe.net/ITI/mCSD/ITI-90.html)  
+  Implemented in `services/iti-90` for query/search flows used by the sender.
+- [ITI-91: Request Care Services Update](https://profiles.ihe.net/ITI/mCSD/ITI-91.html)  
+  Implemented in `services/iti-91` for synchronization/update flows.
+- [ITI-130: Care Services Feed](https://profiles.ihe.net/ITI/mCSD/ITI-130.html)  
+  Implemented in `services/iti-130` for publishing source data into the directory model.
 
-Use this to:
+## PoC scope from PvA (Route PoC 9, sending party)
 
-- Understand how the mCSD updates work in practice
-- Explore Update Client and Data Source interactions
-- Prototype or test mCSD-compliant behaviors
+For PoC 8/9 Route 9, this repository focuses on the **sending party** role in an
+MSZ-to-MSZ BgZ referral flow, using GF Adressering with TA Routering.
+
+Core principles covered by this repository:
+
+- Use representative real-life organizational data in the mCSD directory model.
+- Find MSZ organizations, organizational units, and technical endpoints via the address book.
+- Support endpoint discovery needed for BgZ routing (FHIR, notification, authentication).
+- Compose the notification task targeted to a specific receiving organizational unit.
+- Support end-to-end PoC demonstration with paired sender/receiver parties.
+
+Technical specifications used for this PoC include the NL GF care services IG:
+<https://nuts-foundation.github.io/nl-generic-functions-ig/care-services.html>
+
+## Documentation map
+
+- Repository + full-stack startup: this file
+- Stack details and operations: [`poc9-start-stack/README.md`](poc9-start-stack/README.md)
+- ITI-91 update client service details: [`services/iti-91/README.md`](services/iti-91/README.md)
+- ITI-91 update client architecture/flow docs: [`services/iti-91/docs/README.md`](services/iti-91/docs/README.md)
+- ITI-130 details: [`services/iti-130/README.md`](services/iti-130/README.md)
+- ITI-90 details: [`services/iti-90/README.md`](services/iti-90/README.md)
+
+## Start the full repository stack
+
+From the repository root:
+
+```bash
+cd poc9-start-stack
+docker compose up
+```
+
+After startup:
+
+- ITI-91 API docs: <http://localhost:8509/docs>
+- ITI-90 API docs: <http://localhost:8000/docs>
+- Directory FHIR (without Caddy): <http://localhost:8080/fhir>
+- Update Client FHIR: <http://localhost:8081/fhir>
+- Notified Pull FHIR: <http://localhost:8082/fhir>
+- Postgres: `localhost:5432`
+- Redis: `localhost:16379`
+- Caddy HTTPS endpoint: <https://localhost:443> (when profile `caddy` is enabled)
+
+For full stack instructions (profiles, seeding, endpoints, operations), see
+[`poc9-start-stack/README.md`](poc9-start-stack/README.md).
+
+## Configuration checklist for a working full stack
+
+Before `docker compose up`, check these files:
+
+1. `poc9-start-stack/iti-91.conf`  
+   Copy from `poc9-start-stack/iti-91.conf.example` and adjust ITI-91 runtime settings.
+2. `poc9-start-stack/.env`  
+   Copy from `poc9-start-stack/.env.example` if you want to enable optional profiles
+   (for example `COMPOSE_PROFILES=caddy`).
+3. `services/iti-90/.env.Docker`  
+   Runtime settings for `iti-90-address-book-proxy` in the compose stack (loaded via
+   `env_file`). Check `MCSD_BASE` and, for BgZ endpoints, `MCSD_SENDER_*` values.
+4. `secrets/cloudflare_api_token` (only when using Caddy profile)  
+   Required by the optional Caddy service.
 
 ## Disclaimer
 
-This project and all associated code serve solely as documentation
-and demonstration purposes to illustrate potential system
-communication patterns and architectures.
+This project and all associated code serve solely as documentation and
+demonstration purposes to illustrate potential system communication patterns
+and architectures.
 
 This codebase:
 
@@ -38,12 +101,6 @@ This codebase:
 - Does NOT represent a final specification
 - Should NOT be considered feature-complete or secure
 - May contain errors, omissions, or oversimplified implementations
-
-## Licensing
-
-- **Code**: MIT (see `LICENSE`), except where noted (e.g., `services/iti-91`).
-- **Documentation**: CC BY-SA 4.0 (see `LICENSES/CC-BY-SA-4.0.txt`).
-- **Third-party dependencies**: see `THIRD_PARTY_LICENSES.md` files per service.
 - Has NOT been tested or hardened for real-world scenarios
 
 The code examples are only meant to help understand concepts and demonstrate possibilities.
@@ -51,114 +108,21 @@ The code examples are only meant to help understand concepts and demonstrate pos
 By using or referencing this code, you acknowledge that you do so at your own
 risk and that the authors assume no liability for any consequences of its use.
 
-## Repository layout
-
-- `services/iti-91`: ITI-91 (mCSD Update Client) service root
-- `services/iti-91/app`: application code
-- `services/iti-91/tests`: ITI-91 tests
-- `services/iti-91/docs`: ITI-91 docs
-- `services/iti-130`: ITI-130 publisher
-- `services/iti-90`: placeholder for future work
-
-## Setup
-
-In order to test the update mechanism, you need at least two other instances of
-a FHIR store. One instance as a [Update Client](https://profiles.ihe.net/ITI/mCSD/4.0.0-comment/volume-1.html#146113-update-client)
-and at least one instance as a
-[Data Source](https://profiles.ihe.net/ITI/mCSD/4.0.0-comment/volume-1.html#146114-data-source).
-You can use a [HAPI JPA server](https://hapifhir.io/hapi-fhir/) or
-any other FHIR store of your choosing as long as they support mCSD specs.
-
-Follow the instructions to get the app running:
-
-- if you want to run the application by itself, open this folder in a terminal and execute these commands:
-
-```bash
-cd poc9-start-stack
-docker compose up
-```
-
-This will configure the whole system for you and you should be able to use the
-API right away at <http://localhost:8509/docs>.
-
-The ITI-91 config file lives at `poc9-start-stack/iti-91.conf` (copy
-`poc9-start-stack/iti-91.conf.example` to get started).
-
-To enable Caddy, either set `COMPOSE_PROFILES=caddy` in
-`poc9-start-stack/.env` (copy from `poc9-start-stack/.env.example`) or run:
-
-```bash
-docker compose --profile caddy up
-```
-
-This profile requires `secrets/cloudflare_api_token` to be present for Caddy.
-Without Caddy, you can still access the directory directly at
-`http://localhost:8080/fhir`.
-
-## Seeding directory
-
-There is a mock data seeder available in case you want to seed a mock directory with fake data.
-In a terminal in the same `poc9-start-stack` folder run the following command to add fake test data to the mock directory,
-with a url parameter you can specify the base url of the directory you want to seed:
-
-```bash
-docker compose run --rm mcsd-update-client poetry run seed http://hapi-directory:8080/fhir/
-```
-
-## Docker container builds
-
-There are two ways to build a docker container from this application. The first is the default mode created with:
-
-```bash
-cd services/iti-91
-make container-build
-```
-
-This will build a docker container that will run its migrations to the database specified in
-`poc9-start-stack/iti-91.conf` (mounted as `/src/app.conf`).
-
-The second mode is a "standalone" mode, where it will not generate migrations, and where you must explicitly specify
-an `iti-91.conf` mount mapped to `/src/app.conf`.
-
-```bash
-cd services/iti-91
-make container-build-sa
-```
-
-Both containers only differ in their init script and the default version usually will mount its own local src directory
-into the container's /src dir.
-
-## URL resolving of references
-
-When encountering absolute URLS in references, they will be resolved ONLY when the URL is of the same origin. Otherwise
-it will throw an exception.
-
-## Required interactions for FHIR directories
-
-The Update Client can check if a FHIR directory supports the required interactions by checking its CapabilityStatement.
-This is done automatically if enabled in the config file. There are a few requirements for the CapabilityStatement
-to be valid. A general mCSD capability statement can be found <https://profiles.ihe.net/ITI/mCSD/CapabilityStatement-IHE.mCSD.Directory.html>. This Update-client requires FHIR servers to support the following resources with the specified interactions according to the FHIR R4 specs:
-
-| Resource       | Interactions required               |
-|----------------|------------------------------------|
-| Organization   | read, search-type, history-type |
-| Practitioner   | read, search-type, history-type   |
-| PractitionerRole | read, search-type, history-type |
-| Location       | read, search-type, history-type   |
-| Endpoint       | read, search-type, history-type   |
-| HealthcareService | read, search-type, history-type |
-| OrganizationAffiliation | read, search-type, history-type |
-
-Further it must be an FHIR R4 Rest server and work without authentication.
-
 ## Contribution
 
-As stated in the [Disclaimer](#disclaimer) this project and all associated code serve solely as documentation and
-demonstration purposes to illustrate potential system communication patterns and architectures.
+As stated in the [Disclaimer](#disclaimer), this repository accepts contributions
+that fit the documentation/reference-implementation goal.
 
-For that reason we will only accept contributions that fit this goal. We do appreciate any effort from the
-community, but because our time is limited it is possible that your PR or issue is closed without a full justification.
+Because maintainer time is limited, issues/PRs may be closed without a full
+justification.
 
-If you plan to make non-trivial changes, we recommend to open an issue beforehand where we can discuss your planned changes. This increases the chance that we might be able to use your contribution (or it avoids doing work if there are reasons why we wouldn't be able to use it).
+If you plan non-trivial changes, open an issue first to discuss scope and
+fit before implementation work.
 
-Note that all commits should be signed using a gpg key.
+All commits should be signed using a GPG key.
+
+## Licensing
+
+- **Code**: MIT (see `LICENSE`), except where noted (for example `services/iti-91`).
+- **Documentation**: CC BY-SA 4.0 (see `LICENSES/CC-BY-SA-4.0.txt`).
+- **Third-party dependencies**: see `THIRD_PARTY_LICENSES.md` files per service.

@@ -22,6 +22,12 @@ pip install -r requirements.txt
 De app leest configuratie uit environment variabelen (en optioneel uit `.env` via `pydantic-settings`).
 De tests stellen `MCSD_BASE=https://hapi.fhir.org/baseR4` automatisch in.
 
+Voor de Docker Compose stack in deze repository (`poc9-start-stack/docker-compose.yaml`) geldt:
+
+- service `iti-90-address-book-proxy` laadt settings uit `services/iti-90/.env.Docker` via `env_file`
+- pas dus voor stack-gedrag vooral `services/iti-90/.env.Docker` aan (met name `MCSD_BASE` en `MCSD_SENDER_*`)
+- bij handmatig lokaal starten (`python main.py` of `uvicorn`) wordt standaard `services/iti-90/.env` gebruikt, tenzij je `MCSD_ENV_FILE` zet
+
 #### Upstream mCSD/FHIR base
 
 `MCSD_BASE` is een **volledige base URL**.
