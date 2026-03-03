@@ -8,6 +8,47 @@ ITI-91, and ITI-130.
 > This repository is for PoC/testing and documentation purposes. It is **NOT**
 > intended for production use.
 
+## Quickstart (10 min)
+
+Prerequisite: Docker Desktop / Docker Engine is running.
+
+1. Prepare local config files (skip if already present).
+
+Bash:
+
+```bash
+cp poc9-start-stack/iti-91.conf.example poc9-start-stack/iti-91.conf
+cp poc9-start-stack/.env.example poc9-start-stack/.env
+```
+
+PowerShell:
+
+```powershell
+Copy-Item poc9-start-stack/iti-91.conf.example poc9-start-stack/iti-91.conf
+Copy-Item poc9-start-stack/.env.example poc9-start-stack/.env
+```
+
+2. Start the full stack.
+
+```bash
+cd poc9-start-stack
+docker compose up -d
+```
+
+3. Verify expected success state.
+
+```bash
+docker compose ps
+curl http://localhost:8509/health
+curl http://localhost:8000/health
+```
+
+Expected:
+
+- core containers are `Up` in `docker compose ps`
+- ITI-91 and ITI-90 health endpoints return HTTP `200`
+- API docs are reachable at <http://localhost:8509/docs> and <http://localhost:8000/docs>
+
 ## Current repository state
 
 The repository started from reference implementations, but parts have evolved
