@@ -23,12 +23,12 @@ from fastapi import FastAPI, Query, HTTPException, Request, Depends, Header, Bod
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
-from typing import Dict, Any, List, Optional, Tuple, Literal
+from typing import Annotated, Dict, Any, List, Optional, Tuple, Literal
 from urllib.parse import urlparse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from pydantic import Field, BaseModel
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, BaseModel, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict, NoDecode
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s", stream=sys.stdout)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -58,8 +58,8 @@ class Settings(BaseSettings):
     bearer_token: Optional[str] = Field(None, validation_alias="MCSD_BEARER_TOKEN")
     verify_tls: bool = Field(True, validation_alias="MCSD_VERIFY_TLS")
     ca_certs_file: Optional[str] = Field(None, validation_alias="MCSD_CA_CERTS_FILE")
-    allow_origins: List[str] = Field(["*"], validation_alias="MCSD_ALLOW_ORIGINS")
-    allowed_hosts: List[str] = Field(["*"], validation_alias="MCSD_ALLOWED_HOSTS")
+    allow_origins: Annotated[List[str], NoDecode] = Field(["*"], validation_alias="MCSD_ALLOW_ORIGINS")
+    allowed_hosts: Annotated[List[str], NoDecode] = Field(["*"], validation_alias="MCSD_ALLOWED_HOSTS")
     api_key: Optional[str] = Field(None, validation_alias="MCSD_API_KEY")
     sender_ura: Optional[str] = Field(None, validation_alias="MCSD_SENDER_URA")
     sender_name: Optional[str] = Field(None, validation_alias="MCSD_SENDER_NAME")
@@ -84,6 +84,27 @@ class Settings(BaseSettings):
         env_file=str(_ENV_FILE_PATH),
         case_sensitive=False,
     )
+
+    @staticmethod
+    def _parse_list_value(value: Any) -> List[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if not isinstance(value, str):
+            raise TypeError("Expected a string or list for list-like setting")
+        raw = value.strip()
+        if not raw:
+            return []
+        if raw.startswith("["):
+            parsed = json.loads(raw)
+            if not isinstance(parsed, list):
+                raise ValueError("Expected JSON array for list-like setting")
+            return [str(item).strip() for item in parsed if str(item).strip()]
+        return [part.strip() for part in raw.split(",") if part.strip()]
+
+    @field_validator("allow_origins", "allowed_hosts", mode="before")
+    @classmethod
+    def _parse_comma_or_json_list(cls, value: Any) -> List[str]:
+        return cls._parse_list_value(value)
 
 # Load configured env file early so its values (like MCSD_DEBUG_DUMP_DIR) are applied consistently.
 try:
@@ -418,6 +439,7 @@ app.add_middleware(
 app.add_middleware(RequestIdMiddleware)
 
 
+# Serve HTML pages for demo/dev purposes only
 def _serve_html_page(path: Path) -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"HTML page not found: {path.name}")
@@ -427,6 +449,11 @@ def _serve_html_page(path: Path) -> FileResponse:
 @app.get("/mscd_zoek/", response_class=FileResponse, include_in_schema=False)
 def mscd_zoek_page():
     return _serve_html_page(APP_ROOT / "mcsd_zoek.html")
+
+
+@app.get("/mcsd_bgz_verwijzing/", response_class=FileResponse, include_in_schema=False)
+def mscd_zoek_page():
+    return _serve_html_page(APP_ROOT / "mcsd_bgz_verwijzing.html")
 
 
 @app.exception_handler(HTTPException)

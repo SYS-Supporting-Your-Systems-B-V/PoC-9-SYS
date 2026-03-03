@@ -21,7 +21,7 @@ From the repository root:
 
 ```bash
 cd poc9-start-stack
-docker compose up
+docker compose up -d 
 ```
 
 Main local endpoints:
@@ -63,7 +63,7 @@ Enable Caddy in one of these ways:
 COMPOSE_PROFILES=caddy
 
 # option 2: command line
-docker compose --profile caddy up
+docker compose -d --profile caddy up
 ```
 
 The Caddy profile requires `../secrets/cloudflare_api_token`.
