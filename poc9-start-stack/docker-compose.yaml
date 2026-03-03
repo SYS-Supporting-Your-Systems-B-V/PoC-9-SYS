@@ -74,6 +74,7 @@ services:
     networks:
       - mcsd_update_client_net
     restart: unless-stopped
+    mem_limit: 1g
 
   # Can be tested with on the host machine with:
   # curl -k --resolve mach2.disyepd.com:443:127.0.0.1 https://mach2.disyepd.com/notifiedpull/fhir
@@ -89,6 +90,7 @@ services:
     networks:
       - mcsd_update_client_net
     restart: unless-stopped
+    mem_limit: 1g
 
   # Can be tested with on the host machine with:
   # curl -k --resolve mach2.disyepd.com:443:127.0.0.1 https://mach2.disyepd.com/fhir
@@ -104,6 +106,7 @@ services:
     networks:
       - mcsd_update_client_net
     restart: unless-stopped
+    mem_limit: 1g
 
 
 ## HEALTHCHECK SERVICES FOR HAPI SERVERS
