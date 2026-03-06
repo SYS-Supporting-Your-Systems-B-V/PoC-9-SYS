@@ -288,6 +288,53 @@ def _auth_headers(appmod) -> Dict[str, str]:
     return {"X-API-Key": str(appmod.settings.api_key)}
 
 
+def _capability_mapping_stub(
+    *,
+    target: str,
+    notification_base: str = "https://receiver.example/fhir",
+    endpoint_id: str = "ep-1",
+    organization_ref: str = "Organization/org-owner",
+    organization_display: str = "Ziekenhuis Oost",
+) -> Dict[str, Any]:
+    endpoint = {
+        "id": endpoint_id,
+        "address": f"{notification_base}/Task",
+        "source": "target",
+        "sourceRef": target,
+    }
+    return {
+        "supported": True,
+        "missing": [],
+        "decision": "A",
+        "decision_explanation": "Teststub met geldige notification-capability.",
+        "notification": {
+            "address": endpoint["address"],
+            "base": notification_base,
+            "endpoint_id": endpoint_id,
+            "valid_http_base": True,
+            "source": "target",
+        },
+        "bgz_fhir_server": {},
+        "mapping": {
+            "twiin_ta_notification": {
+                "label": "Twiin TA notificatie",
+                "code": "Twiin-TA-notification",
+                "tokens": ["Twiin-TA-notification"],
+                "required": True,
+                "candidates": {
+                    "target_count": 1,
+                    "organization_count": 0,
+                    "target": [endpoint],
+                    "organization": [],
+                },
+                "chosen": endpoint,
+            }
+        },
+        "organization": {"reference": organization_ref, "display": organization_display},
+        "target": {"reference": target},
+    }
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -331,14 +378,7 @@ def test_bgz_load_data_puts_all_resources_and_updates_sender_ura(appmod, client,
 
 def test_bgz_preflight_location_routing_and_metadata_probe_ok(appmod, client, monkeypatch):
     async def _fake_capability_mapping(*, target: str, organization: str | None, include_oauth: bool, limit: int):
-        return {
-            "supported": True,
-            "notification": {"base": "https://receiver.example/fhir", "endpoint_id": "ep-1"},
-            "mapping": {"twiin_ta_notification": {"chosen": {"id": "ep-1"}}},
-            # Preflight gebruikt deze om owner/location routing te tonen.
-            "organization": {"reference": "Organization/org-owner", "display": "Ziekenhuis Oost"},
-            "target": {"reference": target},
-        }
+        return _capability_mapping_stub(target=target)
 
     # Capability mapping stub
     monkeypatch.setattr(appmod, "poc9_msz_capability_mapping", _fake_capability_mapping)
@@ -400,13 +440,7 @@ def test_bgz_preflight_location_routing_and_metadata_probe_ok(appmod, client, mo
 
 def test_bgz_preflight_not_ready_when_metadata_has_no_task_create(appmod, client, monkeypatch):
     async def _fake_capability_mapping(*, target: str, organization: str | None, include_oauth: bool, limit: int):
-        return {
-            "supported": True,
-            "notification": {"base": "https://receiver.example/fhir", "endpoint_id": "ep-1"},
-            "mapping": {"twiin_ta_notification": {"chosen": {"id": "ep-1"}}},
-            "organization": {"reference": "Organization/org-owner", "display": "Ziekenhuis Oost"},
-            "target": {"reference": target},
-        }
+        return _capability_mapping_stub(target=target)
 
     monkeypatch.setattr(appmod, "poc9_msz_capability_mapping", _fake_capability_mapping)
 
@@ -453,13 +487,7 @@ def test_bgz_preflight_not_ready_when_metadata_has_no_task_create(appmod, client
 
 def test_bgz_preflight_healthcareservice_routing_owner_ref_only(appmod, client, monkeypatch):
     async def _fake_capability_mapping(*, target: str, organization: str | None, include_oauth: bool, limit: int):
-        return {
-            "supported": True,
-            "notification": {"base": "https://receiver.example/fhir", "endpoint_id": "ep-1"},
-            "mapping": {"twiin_ta_notification": {"chosen": {"id": "ep-1"}}},
-            "organization": {"reference": "Organization/org-owner", "display": "Ziekenhuis Oost"},
-            "target": {"reference": target},
-        }
+        return _capability_mapping_stub(target=target)
 
     monkeypatch.setattr(appmod, "poc9_msz_capability_mapping", _fake_capability_mapping)
 

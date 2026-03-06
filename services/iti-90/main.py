@@ -1198,7 +1198,17 @@ MCSDBASE = settings.base_url
 TIMEOUT = settings.upstream_timeout
 HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=TIMEOUT, write=TIMEOUT, pool=TIMEOUT)
 HTTPX_LIMITS = httpx.Limits(max_connections=settings.httpx_max_connections, max_keepalive_connections=settings.httpx_max_keepalive_connections)
-HTTPX_VERIFY = settings.ca_certs_file if settings.verify_tls and settings.ca_certs_file else settings.verify_tls
+
+
+def _build_httpx_verify() -> bool | ssl.SSLContext:
+    if not settings.verify_tls:
+        return False
+    if settings.ca_certs_file:
+        return ssl.create_default_context(cafile=settings.ca_certs_file)
+    return True
+
+
+HTTPX_VERIFY = _build_httpx_verify()
 
 def verify_api_key(
     x_api_key: str | None = Header(
