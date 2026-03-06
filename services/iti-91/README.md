@@ -8,6 +8,22 @@ The implementation originated from the reference project
 [`minvws/gfmodules-mcsd-update-client`](https://github.com/minvws/gfmodules-mcsd-update-client),
 but in this repository it has been extended substantially for PoC operations.
 
+## Running in this repository
+
+For end-to-end local use, run this service through the Compose stack in
+[`../../poc9-start-stack/README.md`](../../poc9-start-stack/README.md). In that
+setup:
+
+- the service starts as `iti-91-mcsd-update-client`
+- `../../poc9-start-stack/iti-91.conf` is mounted as `/src/app.conf`
+- Postgres, Redis, `hapi-update-client`, and `hapi-directory` are provided by
+  the same Compose network
+- the background scheduler starts immediately at bootstrap
+
+If you start the service directly from `services/iti-91`, it looks for
+`app.conf` in the current working directory by default. You can also switch to
+`app.<env>.conf` by setting `APP_ENV=<env>`.
+
 ## Status in this repository
 
 This service is no longer "just the reference implementation". Compared to the
@@ -77,6 +93,15 @@ Key active settings are:
   - `use_directory_registry_db=True`
   - lifecycle thresholds enabled for unhealthy/ignored/deleted handling
 
+## Operational caveat with the shipped PoC config
+
+The default `directories_provider_urls` points to an external test LRZa. That
+means the container can be healthy and reachable on `/health` while background
+directory updates still log validation, data-shape, or interoperability errors
+from remote directories. This does not prevent the local stack from booting, but
+it does mean update completeness depends on the current state of that external
+test environment.
+
 ## Why current PoC settings are not production-ready
 
 The following active settings deliberately make this deployment more forgiving
@@ -114,6 +139,8 @@ To test ITI-91 behavior you need at least:
 - one or more source directory FHIR stores
 
 This repository provides those dependencies through `poc9-start-stack`.
+
+For a reproducible local setup, prefer the Compose stack over a standalone run.
 
 ## Docker container builds
 

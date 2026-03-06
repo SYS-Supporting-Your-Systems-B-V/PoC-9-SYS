@@ -10,9 +10,18 @@ ITI-91, and ITI-130.
 
 ## Quickstart (10 min)
 
-Prerequisite: Docker Desktop / Docker Engine is running.
+Prerequisites:
 
-1. Prepare local config files (skip if already present).
+- Docker Desktop / Docker Engine with the Compose plugin
+- the following host ports are free: `443` (only when using profile `caddy`),
+  `5432`, `8000`, `8080`, `8081`, `8082`, `8509`, `16379`
+
+1. Review local config files.
+
+The repository already contains working PoC defaults in
+`poc9-start-stack/.env`, `poc9-start-stack/iti-91.conf`, and
+`services/iti-90/.env.Docker`. If you want to reset them to the shipped
+templates, copy the example files below.
 
 Bash:
 
@@ -35,18 +44,30 @@ cd poc9-start-stack
 docker compose up -d
 ```
 
+The first boot can take a few minutes because Postgres and the three HAPI
+servers must become healthy before the application services and seed jobs can
+finish.
+
 3. Verify expected success state.
 
 ```bash
-docker compose ps
+docker compose ps --all
 curl http://localhost:8509/health
 curl http://localhost:8000/health
+curl 'http://localhost:8080/fhir/Organization?_summary=count&_count=1'
+curl 'http://localhost:8082/fhir/Task?_summary=count&_count=1'
 ```
 
 Expected:
 
-- core containers are `Up` in `docker compose ps`
+- long-running services are `Up`
+- one-shot seed jobs `iti-130-publisher` and `notifiedpull-seed` complete as
+  `Exited (0)`
 - ITI-91 and ITI-90 health endpoints return HTTP `200`
+- the directory FHIR server returns seeded demo content (default stack: 13
+  `Organization` resources)
+- the notified-pull FHIR server contains seeded demo data (default stack: 1
+  `Task`)
 - API docs are reachable at <http://localhost:8509/docs> and <http://localhost:8000/docs>
 
 ## Current repository state
@@ -95,6 +116,19 @@ Technical baseline:
 - ITI-91 architecture details: [`services/iti-91/docs/README.md`](services/iti-91/docs/README.md)
 - ITI-130 usage details: [`services/iti-130/README.md`](services/iti-130/README.md)
 - ITI-90 usage details: [`services/iti-90/README.md`](services/iti-90/README.md)
+
+## Operational notes
+
+- `poc9-start-stack` is the canonical way to run this repository locally. The
+  service-level READMEs explain internals and standalone usage, but they assume
+  the stack README for the end-to-end boot sequence.
+- The default ITI-91 config points to the external test LRZa
+  `https://knooppunt-test.nuts-services.nl/lrza/mcsd`. The service can be
+  healthy while individual background sync attempts still log validation or
+  interoperability errors from external directories.
+- In this Compose setup Postgres is not mounted to a named volume. `docker
+  compose down` therefore removes the database container and resets stored FHIR
+  state for the next `up`.
 
 ## Start the full stack
 

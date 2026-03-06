@@ -15,14 +15,44 @@ De output bestaat (minimaal) uit:
 
 ---
 
+## Rol in deze repository
+
+In de volledige stack van deze repository draait deze publisher als de
+eenmalige Compose job `iti-130-publisher` uit
+[`../../poc9-start-stack/docker-compose.yaml`](../../poc9-start-stack/docker-compose.yaml).
+De standaard containercommand:
+
+- gebruikt `SQL_CONN=sqlite:///demo.db`
+- publiceert naar `FHIR_BASE=http://hapi-directory:8080/fhir`
+- forceert een lokale demo-reset met `--sqlite-reset-seed` en
+  `--fhir-reset-seed`
+- publiceert practitioners mee met `--include-practitioners`
+
+Daarom is `Exited (0)` na `docker compose up -d` voor deze container de
+verwachte successtatus, niet een fout.
+
+Wil je dezelfde seed-run opnieuw uitvoeren binnen de stack:
+
+```bash
+docker compose -f poc9-start-stack/docker-compose.yaml run --rm iti-130-publisher
+```
+
 ## Vereisten
 
-- Python 3
+- Python 3.11
 - **Verplichte dependencies** (altijd nodig): `pydantic`, `pydantic-settings`, `requests`, `urllib3`
 - Voor **SQLite** kan het script draaien zonder SQLAlchemy (valt terug op de ingebouwde `sqlite3` module).
 - Voor **MS SQL Server** gebruikt het script bij voorkeur **SQLAlchemy** met een MSSQL driver (bijv. `mssql+pytds://...` of via `pyodbc`).
 Als SQL_CONN mssql+pytds gebruikt dan is dit in requirements.txt nodig: python-tds
 Als SQL_CONN ODBC connection string of mssql+pyodbc gebruikt dan is dit in requirements.txt nodig: pyodbc
+
+Lokale installatie:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
 
 ---
 

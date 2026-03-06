@@ -9,6 +9,18 @@ De proxy bedient twee PoC's die onafhankelijk van elkaar ingezet kunnen worden:
 
 ---
 
+## Rol in deze repository
+
+Voor de volledige lokale PoC-stack start je via
+[`../../poc9-start-stack/README.md`](../../poc9-start-stack/README.md). In die
+setup draait deze service als `iti-90-address-book-proxy` op poort `8000` en
+laadt hij configuratie uit `services/iti-90/.env.Docker`.
+
+Belangrijk bij verificatie en handmatige tests: deze app gebruikt
+`MCSD_ALLOWED_HOSTS`. Benader de service daarom via `http://localhost:8000` of
+een andere hostnaam die in `.env.Docker` is toegestaan; anders krijg je
+`Invalid host header`.
+
 ## PoC-overzicht: endpoints en configuratie
 
 ### Endpoints per PoC
