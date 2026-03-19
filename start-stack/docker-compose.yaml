@@ -8,8 +8,8 @@ services:
         NEW_GID: ${NEW_GID:-1000}
     ports:
       - "8509:8509"
-    environment:
-      DO_NOT_USE_ON_PRODUCTION: "I'm a fool if I run this application on a production environment."
+    # environment:
+    #   DO_NOT_USE_ON_PRODUCTION: "I'm a fool if I run this application on a production environment."
     volumes:
       - ../services/iti-91:/src
       - ../secrets:/src/secrets

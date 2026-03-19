@@ -26,14 +26,14 @@ echo " - an environment that contains sensitive information;"
 echo " - an environment that should remain secure."
 echo ""
 
-_DO_NOT_USE_ON_PRODUCTION="I'm a fool if I run this application on a production environment."
+# _DO_NOT_USE_ON_PRODUCTION="I'm a fool if I run this application on a production environment."
 
-if [ "$DO_NOT_USE_ON_PRODUCTION" != "$_DO_NOT_USE_ON_PRODUCTION" ]; then
-  echo "If you want to continue, set the \"DO_NOT_USE_ON_PRODUCTION\" variable"
-  echo " to \"$_DO_NOT_USE_ON_PRODUCTION\""
-  echo ""
-  exit 1
-fi
+# if [ "$DO_NOT_USE_ON_PRODUCTION" != "$_DO_NOT_USE_ON_PRODUCTION" ]; then
+#   echo "If you want to continue, set the \"DO_NOT_USE_ON_PRODUCTION\" variable"
+#   echo " to \"$_DO_NOT_USE_ON_PRODUCTION\""
+#   echo ""
+#   exit 1
+# fi
 
 echo "--------------------------------------------"
 echo "Starting main application"
