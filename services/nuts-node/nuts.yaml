@@ -1,17 +1,22 @@
 strictmode: false
 # url: http://localhost:8081
-url: https://mach2.disyepd.com/nuts-oauth2
+url: https://__PUBLIC_DOMAIN__/nuts-oauth2
 datadir: /data
 didmethods: [web]
 
 http:
   public:
-    address: :8081
+    address: :8084
   internal:
-    address: :8080
+    address: :8083
 
 crypto:
   storage: fs
 
+tls:
+  certfile: /opt/nuts/certs/__PUBLIC_DOMAIN__.pem
+  certkeyfile: /opt/nuts/certs/__PUBLIC_DOMAIN__.key
+  truststorefile: /opt/nuts/certs/__PUBLIC_DOMAIN__-chain.pem
+
 policy:
-  directory: ./policies
+  directory: /opt/nuts/policies

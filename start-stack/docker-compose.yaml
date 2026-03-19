@@ -58,6 +58,29 @@ services:
       - mcsd_update_client_net
     restart: unless-stopped
 
+  nuts-node:
+    build:
+      context: ../services/nuts-node
+      dockerfile: Dockerfile
+    environment:
+      NUTS_CONFIGFILE: /opt/nuts/nuts.yaml
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-mach2.disyepd.com}
+    ports:
+      - "8083:8083"
+      - "8084:8084"
+    volumes:
+      - ../services/nuts-node/certs:/opt/nuts/certs:ro
+      - ./caddy:/opt/local-caddy:ro
+      - nuts_node_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - mcsd_update_client_net
+    restart: unless-stopped
+
 
 ## HAPI FHIR SERVERS
   hapi-update-client:
@@ -82,7 +105,7 @@ services:
     ports:
       - "8082:8082"
     environment:
-      HAPI_NOTIFIEDPULL_PUBLIC_URL: ${HAPI_NOTIFIEDPULL_PUBLIC_URL:-http://localhost:8082/fhir}
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-mach2.disyepd.com}
     configs:
       - source: hapi_notifiedpull_stu3_config
         target: /app/config/application.yaml
@@ -99,7 +122,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      HAPI_DIRECTORY_PUBLIC_URL: ${HAPI_DIRECTORY_PUBLIC_URL:-http://localhost:8080/fhir}
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-mach2.disyepd.com}
     configs:
       - source: hapi_directory_config
         target: /app/config/application.yaml
@@ -189,36 +212,18 @@ services:
       - mcsd_update_client_net
     restart: "no"
 
-  nuts-node:
-    build:
-      context: ../services/nuts-node
-      dockerfile: Dockerfile
-    environment:
-      NUTS_CONFIGFILE: /opt/nuts/nuts.yaml
-    ports:
-      - "8083:8080"
-      - "8084:8081"
-    volumes:
-      - nuts_node_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    networks:
-      - mcsd_update_client_net
-    restart: unless-stopped
-
   caddy:
     build:
       context: .
       dockerfile: caddy/Dockerfile
     profiles:
       - caddy
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-mach2.disyepd.com}
     ports:
       - "443:443"
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/${CADDYFILE_NAME:-Caddyfile}:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     secrets:
@@ -233,7 +238,9 @@ services:
       - hapi-directory
       - nuts-node
     networks:
-      - mcsd_update_client_net
+      mcsd_update_client_net:
+        aliases:
+          - ${PUBLIC_DOMAIN:-mach2.disyepd.com}
     restart: unless-stopped
 
   redis:

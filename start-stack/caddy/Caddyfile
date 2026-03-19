@@ -1,6 +1,7 @@
-mach2.disyepd.com {
+{$PUBLIC_DOMAIN} {
+
   handle_path /nuts-oauth2/* {
-    reverse_proxy nuts-node:8081
+    reverse_proxy nuts-node:8084
   }
 
 #  handle_path /notifiedpull/* {
@@ -12,7 +13,7 @@ mach2.disyepd.com {
     # The standard introspection endpoint returns 200 even for inactive tokens, so in
     # production you should proxy to a small auth sidecar that returns 2xx only when
     # the token is valid.
-    forward_auth nuts-node:8080 {
+    forward_auth nuts-node:8083 {
       uri /internal/auth/v2/accesstoken/introspect
       copy_headers Authorization
     }
