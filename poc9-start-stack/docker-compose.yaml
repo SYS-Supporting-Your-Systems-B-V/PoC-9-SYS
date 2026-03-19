@@ -183,6 +183,26 @@ services:
       - mcsd_update_client_net
     restart: "no"
 
+  nuts-node:
+    build:
+      context: ../services/nuts-node
+      dockerfile: Dockerfile
+    environment:
+      NUTS_CONFIGFILE: /opt/nuts/nuts.yaml
+    ports:
+      - "8083:8080"
+      - "8084:8081"
+    volumes:
+      - nuts_node_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - mcsd_update_client_net
+    restart: unless-stopped
+
   caddy:
     build:
       context: .
@@ -205,6 +225,7 @@ services:
       ]
     depends_on:
       - hapi-directory
+      - nuts-node
     networks:
       - mcsd_update_client_net
     restart: unless-stopped
@@ -254,6 +275,7 @@ secrets:
 volumes:
   caddy_data:
   caddy_config:
+  nuts_node_data:
 
 networks:
   mcsd_update_client_net:
