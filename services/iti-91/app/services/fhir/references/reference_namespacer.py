@@ -20,7 +20,7 @@ def _namespace_reference(ref: Reference, namespace: str) -> Reference | None:
     res_type, _id = get_resource_from_reference(ref.reference)
     if not res_type or not _id:
         return None
-
+    
     ref.reference = f"{res_type}/{make_namespaced_fhir_id(namespace, _id)}"
     return ref
 
