@@ -64,6 +64,8 @@ services:
     image: "hapiproject/hapi:latest"
     ports:
       - "8081:8081"
+    environment:
+      HAPI_UPDATE_CLIENT_PRIVATE_URL: ${HAPI_UPDATE_CLIENT_PRIVATE_URL:-http://localhost:8081/fhir}
     configs:
       - source: hapi_update_client_config
         target: /app/config/application.yaml
@@ -79,6 +81,8 @@ services:
     image: "hapiproject/hapi:latest"
     ports:
       - "8082:8082"
+    environment:
+      HAPI_NOTIFIEDPULL_PUBLIC_URL: ${HAPI_NOTIFIEDPULL_PUBLIC_URL:-http://localhost:8082/fhir}
     configs:
       - source: hapi_notifiedpull_stu3_config
         target: /app/config/application.yaml
@@ -94,6 +98,8 @@ services:
     image: "hapiproject/hapi:latest"
     ports:
       - "8080:8080"
+    environment:
+      HAPI_DIRECTORY_PUBLIC_URL: ${HAPI_DIRECTORY_PUBLIC_URL:-http://localhost:8080/fhir}
     configs:
       - source: hapi_directory_config
         target: /app/config/application.yaml
