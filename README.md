@@ -74,18 +74,18 @@ Follow the instructions to get the app running:
 - if you want to run the application by itself, open this folder in a terminal and execute these commands:
 
 ```bash
-cd poc9-start-stack
+cd start-stack
 docker compose up
 ```
 
 This will configure the whole system for you and you should be able to use the
 API right away at <http://localhost:8509/docs>.
 
-The ITI-91 config file lives at `poc9-start-stack/iti-91.conf` (copy
-`poc9-start-stack/iti-91.conf.example` to get started).
+The ITI-91 config file lives at `start-stack/iti-91.conf` (copy
+`start-stack/iti-91.conf.example` to get started).
 
 To enable Caddy, either set `COMPOSE_PROFILES=caddy` in
-`poc9-start-stack/.env` (copy from `poc9-start-stack/.env.example`) or run:
+`start-stack/.env` (copy from `start-stack/.env.example`) or run:
 
 ```bash
 docker compose --profile caddy up
@@ -98,7 +98,7 @@ Without Caddy, you can still access the directory directly at
 ## Seeding directory
 
 There is a mock data seeder available in case you want to seed a mock directory with fake data.
-In a terminal in the same `poc9-start-stack` folder run the following command to add fake test data to the mock directory,
+In a terminal in the same `start-stack` folder run the following command to add fake test data to the mock directory,
 with a url parameter you can specify the base url of the directory you want to seed:
 
 ```bash
@@ -115,7 +115,7 @@ make container-build
 ```
 
 This will build a docker container that will run its migrations to the database specified in
-`poc9-start-stack/iti-91.conf` (mounted as `/src/app.conf`).
+`start-stack/iti-91.conf` (mounted as `/src/app.conf`).
 
 The second mode is a "standalone" mode, where it will not generate migrations, and where you must explicitly specify
 an `iti-91.conf` mount mapped to `/src/app.conf`.
