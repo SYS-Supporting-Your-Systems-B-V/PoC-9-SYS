@@ -5,11 +5,7 @@
   }
 
   handle_path /notifiedpull/* {
-    forward_auth nuts-node:8083 {
-      uri /internal/auth/v2/accesstoken/introspect
-      copy_headers Authorization
-    }
-    reverse_proxy hapi-notifiedpull-stu3:8082
+    reverse_proxy sender-bgz-gateway:8001
   }
 
   handle {

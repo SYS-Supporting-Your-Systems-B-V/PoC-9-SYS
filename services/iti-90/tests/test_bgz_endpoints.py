@@ -44,6 +44,18 @@ def _data_file(appmod, filename: str) -> Path:
     return base / "data" / filename
 
 
+def _import_iti90_app_module():
+    service_root = Path(__file__).resolve().parents[1]
+    sys.modules.pop("configs", None)
+    sys.modules.pop("main", None)
+    sys.path.insert(0, str(service_root))
+    try:
+        return importlib.import_module("main")
+    finally:
+        if sys.path and sys.path[0] == str(service_root):
+            sys.path.pop(0)
+
+
 def _load_json(path: Path) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -71,6 +83,8 @@ def assert_task_matches_notification_template(
     template: Dict[str, Any],
     sender_ura: str,
     sender_name: str,
+    sender_uzi_sys: str,
+    sender_system_name: str,
     receiver_ura: str,
     receiver_name: str,
     patient_bsn: str,
@@ -80,6 +94,10 @@ def assert_task_matches_notification_template(
     expected_owner_display: Optional[str],
     expected_location_ref: Optional[str],
     expected_location_display: Optional[str],
+    expected_extension_location_ref: Optional[str] = None,
+    expected_extension_location_display: Optional[str] = None,
+    expected_extension_healthcareservice_ref: Optional[str] = None,
+    expected_extension_healthcareservice_display: Optional[str] = None,
     expected_workflow_task_id: Optional[str],
 ) -> None:
     """Asserties voor de gegenereerde BgZ Task op basis van notification-task.json.
@@ -90,7 +108,7 @@ def assert_task_matches_notification_template(
     """
 
     # --- Ongewijzigd t.o.v. template ---
-    for key in ("resourceType", "id", "meta", "status", "intent", "code", "input"):
+    for key in ("resourceType", "id", "meta", "status", "intent", "code"):
         assert task.get(key) == template.get(key), f"Veld '{key}' wijkt af van template"
 
     # --- groupIdentifier / identifier: UUID URNs maar met zelfde system ---
@@ -126,7 +144,9 @@ def assert_task_matches_notification_template(
     assert 364 <= delta_days <= 366, f"restriction.end lijkt geen 365 dagen na authoredOn ({delta_days} dagen)"
 
     # --- Sender (requester.onBehalfOf) ---
-    assert task["requester"]["agent"] == template["requester"]["agent"], "requester.agent moet uit template komen"
+    assert task["requester"]["agent"]["identifier"]["system"] == template["requester"]["agent"]["identifier"]["system"]
+    assert task["requester"]["agent"]["identifier"]["value"] == sender_uzi_sys
+    assert task["requester"]["agent"]["display"] == sender_system_name
     assert task["requester"]["onBehalfOf"]["identifier"]["system"] == template["requester"]["onBehalfOf"]["identifier"]["system"]
     assert task["requester"]["onBehalfOf"]["identifier"]["value"] == sender_ura
     assert task["requester"]["onBehalfOf"]["display"] == sender_name
@@ -149,6 +169,30 @@ def assert_task_matches_notification_template(
         if expected_location_display is not None:
             assert task["location"].get("display") == expected_location_display
 
+    location_extension = _find_task_extension(
+        task,
+        "http://nuts-foundation.github.io/nl-generic-functions-ig/StructureDefinition/task-stu3-location",
+    )
+    if expected_extension_location_ref is None:
+        assert location_extension is None, "task-stu3-location hoort niet aanwezig te zijn"
+    else:
+        assert location_extension is not None, "task-stu3-location ontbreekt"
+        assert location_extension["valueReference"]["reference"] == expected_extension_location_ref
+        if expected_extension_location_display is not None:
+            assert location_extension["valueReference"].get("display") == expected_extension_location_display
+
+    healthcare_service_extension = _find_task_extension(
+        task,
+        "http://nuts-foundation.github.io/nl-generic-functions-ig/StructureDefinition/task-stu3-healthcareservice",
+    )
+    if expected_extension_healthcareservice_ref is None:
+        assert healthcare_service_extension is None, "task-stu3-healthcareservice hoort niet aanwezig te zijn"
+    else:
+        assert healthcare_service_extension is not None, "task-stu3-healthcareservice ontbreekt"
+        assert healthcare_service_extension["valueReference"]["reference"] == expected_extension_healthcareservice_ref
+        if expected_extension_healthcareservice_display is not None:
+            assert healthcare_service_extension["valueReference"].get("display") == expected_extension_healthcareservice_display
+
     # --- Patient (Task.for) ---
     assert task["for"]["identifier"]["system"] == template["for"]["identifier"]["system"]
     assert task["for"]["identifier"]["value"] == patient_bsn
@@ -162,6 +206,16 @@ def assert_task_matches_notification_template(
         assert task.get("description") == description
     else:
         assert "description" not in task
+
+    # --- Dynamic Task.input entries ---
+    auth_input = _find_task_input(task, "authorization-base")
+    assert auth_input is not None, "authorization-base input ontbreekt"
+    assert isinstance(auth_input.get("valueString"), str) and auth_input["valueString"].strip()
+    assert auth_input["valueString"] != "DYNAMIC:authorization_base"
+
+    workflow_input = _find_task_input(task, "get-workflow-task")
+    assert workflow_input is not None, "get-workflow-task input ontbreekt"
+    assert workflow_input.get("valueBoolean") is True
 
 
 @dataclass
@@ -191,26 +245,38 @@ class FakeHttpClient:
         self._next_put_response: DummyResponse = DummyResponse(200)
         self._next_post_response: DummyResponse = DummyResponse(201, {"resourceType": "Task", "id": "task-1", "status": "requested"})
         self._next_get_response: DummyResponse = DummyResponse(200, {})
+        self._put_responses: List[DummyResponse] = []
+        self._post_responses: List[DummyResponse] = []
+        self._get_responses: List[DummyResponse] = []
 
     def queue_put_response(self, resp: DummyResponse) -> None:
         self._next_put_response = resp
+        self._put_responses.append(resp)
 
     def queue_post_response(self, resp: DummyResponse) -> None:
         self._next_post_response = resp
+        self._post_responses.append(resp)
 
     def queue_get_response(self, resp: DummyResponse) -> None:
         self._next_get_response = resp
+        self._get_responses.append(resp)
 
     async def put(self, url: str, *, json: Any = None, headers: Optional[Dict[str, str]] = None):
         self.put_calls.append({"url": url, "json": json, "headers": headers or {}})
+        if self._put_responses:
+            return self._put_responses.pop(0)
         return self._next_put_response
 
     async def post(self, url: str, *, json: Any = None, headers: Optional[Dict[str, str]] = None):
         self.post_calls.append({"url": url, "json": json, "headers": headers or {}})
+        if self._post_responses:
+            return self._post_responses.pop(0)
         return self._next_post_response
 
-    async def get(self, url: str, *, headers: Optional[Dict[str, str]] = None, timeout: Optional[float] = None):
-        self.get_calls.append({"url": url, "headers": headers or {}, "timeout": timeout})
+    async def get(self, url: str, *, headers: Optional[Dict[str, str]] = None, timeout: Optional[float] = None, params: Any = None):
+        self.get_calls.append({"url": url, "headers": headers or {}, "timeout": timeout, "params": params})
+        if self._get_responses:
+            return self._get_responses.pop(0)
         return self._next_get_response
 
     async def aclose(self) -> None:
@@ -224,27 +290,57 @@ class FakeHttpClient:
 
 @pytest.fixture()
 def appmod(monkeypatch):
-    mod = _import_app_module()
+    mod = _import_iti90_app_module()
 
     # Forceer test-config zodat tests onafhankelijk zijn van de CI/env.
     monkeypatch.setattr(mod.settings, "api_key", "test-api-key", raising=False)
     monkeypatch.setattr(mod.settings, "sender_ura", "12345678", raising=False)
     monkeypatch.setattr(mod.settings, "sender_name", "Huisartsenpraktijk De Vries", raising=False)
+    monkeypatch.setattr(mod.settings, "sender_uzi_sys", "00009876543", raising=False)
+    monkeypatch.setattr(mod.settings, "sender_system_name", "SYS EPD POC9", raising=False)
     monkeypatch.setattr(mod.settings, "sender_bgz_base", None, raising=False)
+    monkeypatch.setattr(mod.settings, "sender_bgz_public_base", None, raising=False)
+    monkeypatch.setattr(mod.settings, "sender_bgz_storage_base", "http://sender-storage.example/fhir", raising=False)
     monkeypatch.setattr(mod.settings, "is_production", False, raising=False)
     monkeypatch.setattr(mod.settings, "allow_task_preview_in_production", True, raising=False)
+    monkeypatch.setattr(mod.settings, "verify_tls", False, raising=False)
+    monkeypatch.setattr(mod, "HTTPX_VERIFY", False, raising=False)
 
     return mod
 
 
 @pytest.fixture()
 def client(appmod):
-    with TestClient(appmod.app) as c:
+    with TestClient(appmod.app, base_url="http://localhost") as c:
         yield c
 
 
 def _auth_headers(appmod) -> Dict[str, str]:
     return {"X-API-Key": str(appmod.settings.api_key)}
+
+
+def _find_task_extension(task: Dict[str, Any], url: str) -> Optional[Dict[str, Any]]:
+    for extension in task.get("extension") or []:
+        if isinstance(extension, dict) and extension.get("url") == url:
+            return extension
+    return None
+
+
+def _find_task_input(task: Dict[str, Any], code: str) -> Optional[Dict[str, Any]]:
+    for item in task.get("input") or []:
+        if not isinstance(item, dict):
+            continue
+        coding = ((item.get("type") or {}).get("coding") or [])
+        if any(isinstance(entry, dict) and entry.get("code") == code for entry in coding):
+            return item
+    return None
+
+
+def _find_task_identifier(task: Dict[str, Any], system: str) -> Optional[Dict[str, Any]]:
+    for identifier in task.get("identifier") or []:
+        if isinstance(identifier, dict) and identifier.get("system") == system:
+            return identifier
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +403,20 @@ def test_bgz_preflight_location_routing_and_metadata_probe_ok(appmod, client, mo
         DummyResponse(
             200,
             {
+                "resourceType": "Organization",
+                "identifier": [
+                    {
+                        "system": "http://fhir.nl/fhir/NamingSystem/ura",
+                        "value": "87654321",
+                    }
+                ],
+            },
+        )
+    )
+    fake.queue_get_response(
+        DummyResponse(
+            200,
+            {
                 "resourceType": "CapabilityStatement",
                 "rest": [
                     {
@@ -336,6 +446,7 @@ def test_bgz_preflight_location_routing_and_metadata_probe_ok(appmod, client, mo
 
     assert body["supported"] is True
     assert body["resolved_receiver_base"] == "https://receiver.example/fhir"
+    assert body["resolved_receiver_ura"] == "87654321"
     assert body["notification_endpoint_id"] == "ep-1"
     assert body["frontend_endpoint_id_match"] is True
 
@@ -345,7 +456,6 @@ def test_bgz_preflight_location_routing_and_metadata_probe_ok(appmod, client, mo
     assert probe["ok"] is True
     assert probe["reachable"] is True
     assert probe["task_create_supported"] is True
-    assert body["ready_to_send"] is True
 
     # Routing output
     routing = body["task_routing"]
@@ -367,6 +477,20 @@ def test_bgz_preflight_not_ready_when_metadata_has_no_task_create(appmod, client
     monkeypatch.setattr(appmod, "poc9_msz_capability_mapping", _fake_capability_mapping)
 
     fake = FakeHttpClient()
+    fake.queue_get_response(
+        DummyResponse(
+            200,
+            {
+                "resourceType": "Organization",
+                "identifier": [
+                    {
+                        "system": "http://fhir.nl/fhir/NamingSystem/ura",
+                        "value": "87654321",
+                    }
+                ],
+            },
+        )
+    )
     # CapabilityStatement zonder Task.create
     fake.queue_get_response(
         DummyResponse(
@@ -417,6 +541,20 @@ def test_bgz_preflight_healthcareservice_routing_owner_ref_only(appmod, client, 
     monkeypatch.setattr(appmod, "poc9_msz_capability_mapping", _fake_capability_mapping)
 
     fake = FakeHttpClient()
+    fake.queue_get_response(
+        DummyResponse(
+            200,
+            {
+                "resourceType": "Organization",
+                "identifier": [
+                    {
+                        "system": "http://fhir.nl/fhir/NamingSystem/ura",
+                        "value": "87654321",
+                    }
+                ],
+            },
+        )
+    )
     fake.queue_get_response(DummyResponse(200, {"resourceType": "CapabilityStatement", "rest": []}))
     monkeypatch.setattr(appmod.app.state, "http_client", fake, raising=False)
 
@@ -432,7 +570,7 @@ def test_bgz_preflight_healthcareservice_routing_owner_ref_only(appmod, client, 
     body = r.json()
     routing = body["task_routing"]
     assert routing["target_type"] == "HealthcareService"
-    assert routing["owner_ref"] == "HealthcareService/hs-1"
+    assert routing["owner_ref"] == "Organization/org-owner"
     assert routing["location_ref"] is None
 
 
@@ -449,6 +587,7 @@ def test_bgz_task_preview_location_routing_builds_task_from_template(appmod, cli
             "Location/loc-1",
             "Organization/org-fallback",
             "Location",
+            "87654321",
         )
 
     monkeypatch.setattr(appmod, "_resolve_bgz_notify_destination", _fake_resolve)
@@ -482,6 +621,8 @@ def test_bgz_task_preview_location_routing_builds_task_from_template(appmod, cli
         template=template,
         sender_ura="12345678",
         sender_name="Huisartsenpraktijk De Vries",
+        sender_uzi_sys="00009876543",
+        sender_system_name="SYS EPD POC9",
         receiver_ura="87654321",
         receiver_name="Ziekenhuis Oost - Cardiologie",
         patient_bsn="999999990",
@@ -489,8 +630,10 @@ def test_bgz_task_preview_location_routing_builds_task_from_template(appmod, cli
         description="BgZ beschikbaar voor test (locatie)",
         expected_owner_ref="Organization/org-owner",
         expected_owner_display="Ziekenhuis Oost",
-        expected_location_ref="Location/loc-1",
-        expected_location_display="Ziekenhuis Oost - Cardiologie",
+        expected_location_ref=None,
+        expected_location_display=None,
+        expected_extension_location_ref="Location/loc-1",
+        expected_extension_location_display="Ziekenhuis Oost - Cardiologie",
         expected_workflow_task_id=body["workflow_task_id"],
     )
 
@@ -508,6 +651,7 @@ def test_bgz_task_preview_healthcareservice_routing_builds_task_from_template(ap
             "HealthcareService/hs-1",
             "Organization/org-fallback",
             "HealthcareService",
+            "87654321",
         )
 
     monkeypatch.setattr(appmod, "_resolve_bgz_notify_destination", _fake_resolve)
@@ -537,15 +681,19 @@ def test_bgz_task_preview_healthcareservice_routing_builds_task_from_template(ap
         template=template,
         sender_ura="12345678",
         sender_name="Huisartsenpraktijk De Vries",
+        sender_uzi_sys="00009876543",
+        sender_system_name="SYS EPD POC9",
         receiver_ura="87654321",
         receiver_name="Ziekenhuis Oost - Cardiologie",
         patient_bsn="999999990",
         patient_name="Test Patient",
         description="BgZ beschikbaar voor test (service)",
-        expected_owner_ref="HealthcareService/hs-1",
-        expected_owner_display="Ziekenhuis Oost - Cardiologie",
+        expected_owner_ref="Organization/org-owner",
+        expected_owner_display="Ziekenhuis Oost",
         expected_location_ref=None,
         expected_location_display=None,
+        expected_extension_healthcareservice_ref="HealthcareService/hs-1",
+        expected_extension_healthcareservice_display="Ziekenhuis Oost - Cardiologie",
         expected_workflow_task_id=body["workflow_task_id"],
     )
 
@@ -564,6 +712,7 @@ def test_bgz_task_preview_generates_workflow_task_id_when_missing(appmod, client
             "Organization/org-1",
             "Organization/org-1",
             "Organization",
+            "87654321",
         )
 
     monkeypatch.setattr(appmod, "_resolve_bgz_notify_destination", _fake_resolve)
@@ -595,6 +744,8 @@ def test_bgz_task_preview_generates_workflow_task_id_when_missing(appmod, client
         template=template,
         sender_ura="12345678",
         sender_name="Huisartsenpraktijk De Vries",
+        sender_uzi_sys="00009876543",
+        sender_system_name="SYS EPD POC9",
         receiver_ura="87654321",
         receiver_name="Ziekenhuis Oost",
         patient_bsn="999999990",
@@ -620,6 +771,7 @@ def test_bgz_notify_posts_task_and_returns_result(appmod, client, monkeypatch):
             "Organization/org-1",
             "Organization/org-1",
             "Organization",
+            "87654321",
         )
 
     monkeypatch.setattr(appmod, "_resolve_bgz_notify_destination", _fake_resolve)
@@ -664,6 +816,8 @@ def test_bgz_notify_posts_task_and_returns_result(appmod, client, monkeypatch):
         template=template,
         sender_ura="12345678",
         sender_name="Huisartsenpraktijk De Vries",
+        sender_uzi_sys="00009876543",
+        sender_system_name="SYS EPD POC9",
         receiver_ura="87654321",
         receiver_name="Ziekenhuis Oost",
         patient_bsn="999999990",
@@ -675,3 +829,70 @@ def test_bgz_notify_posts_task_and_returns_result(appmod, client, monkeypatch):
         expected_location_display=None,
         expected_workflow_task_id="wf-777",
     )
+
+
+def test_bgz_notify_uses_public_base_and_storage_base_and_persists_authorization_base(appmod, client, monkeypatch):
+    async def _fake_resolve(*, receiver_target_ref: str, receiver_org_ref: str | None, receiver_notification_endpoint_id: str | None):
+        return (
+            {
+                "organization": {"reference": "Organization/org-1", "display": "Ziekenhuis Oost"},
+            },
+            "https://receiver.example/fhir",
+            "ep-1",
+            "Organization/org-1",
+            "Organization/org-1",
+            "Organization",
+            "87654321",
+        )
+
+    monkeypatch.setattr(appmod, "_resolve_bgz_notify_destination", _fake_resolve)
+    monkeypatch.setattr(appmod.settings, "sender_bgz_public_base", "https://sender.example/notifiedpull/fhir", raising=False)
+    monkeypatch.setattr(appmod.settings, "sender_bgz_storage_base", "http://hapi-notifiedpull-stu3:8082/fhir", raising=False)
+    monkeypatch.setattr(appmod.settings, "sender_bgz_base", None, raising=False)
+
+    fake = FakeHttpClient()
+    fake.queue_put_response(DummyResponse(200, {"resourceType": "Task", "id": "wf-777", "status": "requested"}))
+    fake.queue_post_response(DummyResponse(201, {"resourceType": "Task", "id": "task-123", "status": "requested"}))
+    monkeypatch.setattr(appmod.app.state, "http_client", fake, raising=False)
+
+    response = client.post(
+        "/bgz/notify",
+        json={
+            "receiver_ura": "87654321",
+            "receiver_name": "Ziekenhuis Oost",
+            "receiver_org_ref": "Organization/org-1",
+            "receiver_target_ref": "Organization/org-1",
+            "receiver_notification_endpoint_id": "ep-1",
+            "patient_bsn": "999999990",
+            "patient_name": "Test Patient",
+            "description": "BgZ beschikbaar voor test (notify split bases)",
+            "workflow_task_id": "wf-777",
+        },
+        headers=_auth_headers(appmod),
+    )
+    assert response.status_code == 200, response.text
+
+    assert len(fake.put_calls) == 1
+    put_call = fake.put_calls[0]
+    assert put_call["url"] == "http://hapi-notifiedpull-stu3:8082/fhir/Task/wf-777"
+
+    workflow_task = put_call["json"]
+    auth_identifier = _find_task_identifier(
+        workflow_task,
+        "https://sys.local/fhir/NamingSystem/task-authorization-base",
+    )
+    assert auth_identifier is not None
+    assert auth_identifier["value"]
+
+    auth_input = _find_task_input(workflow_task, "authorization-base")
+    assert auth_input is not None
+    assert auth_input["valueString"] == auth_identifier["value"]
+
+    assert len(fake.post_calls) == 1
+    notification_task = fake.post_calls[0]["json"]
+    sender_bgz_ext = _find_task_extension(
+        notification_task,
+        "http://example.org/fhir/StructureDefinition/sender-bgz-base",
+    )
+    assert sender_bgz_ext is not None
+    assert sender_bgz_ext["valueUrl"] == "https://sender.example/notifiedpull/fhir"

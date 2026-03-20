@@ -143,6 +143,22 @@ export MCSD_SENDER_BGZ_BASE=https://mijn-sender-fhir.example.org/fhir
 
 Als `MCSD_SENDER_BGZ_BASE` ontbreekt, wordt die metadata niet meegestuurd.
 
+Voor PoC 11-13 gebruikt deze repo nu liever de split sender-configuratie:
+
+- `MCSD_SENDER_UZI_SYS` en `MCSD_SENDER_SYSTEM_NAME` zijn verplicht voor de sender-identiteit in Task.requester.agent
+- `MCSD_SENDER_BGZ_PUBLIC_BASE` bepaalt welke publieke sender BgZ/FHIR base in de notification Task terechtkomt
+- `MCSD_SENDER_BGZ_STORAGE_BASE` bepaalt waar SYS lokaal de workflow task opslaat op de sender FHIR server
+- `MCSD_SENDER_BGZ_BASE` blijft alleen nog als legacy fallback bestaan als de split variabelen niet zijn gezet
+
+Voorbeeld:
+
+```bash
+export MCSD_SENDER_UZI_SYS=00009876543
+export MCSD_SENDER_SYSTEM_NAME="SYS EPD POC9"
+export MCSD_SENDER_BGZ_PUBLIC_BASE=https://mijn-sender.example.org/notifiedpull/fhir
+export MCSD_SENDER_BGZ_STORAGE_BASE=http://hapi-notifiedpull-stu3:8082/fhir
+```
+
 #### [PoC] Audit logging en task preview (voor `POST /bgz/notify` en `POST /bgz/task-preview`)
 
 Voor audit logging en (optioneel) het tonen van de uiteindelijke Task vóór verzending zijn er extra variabelen:
@@ -416,6 +432,13 @@ curl -X POST "http://localhost:8000/bgz/load-data?hapi_base=http://localhost:808
 
 Stuurt een notificatie **Task** (notified pull pattern) naar de receiver (`{receiver_notification_base}/Task`).  
 De sender-identiteit komt uit environment variabelen (`MCSD_SENDER_URA`, `MCSD_SENDER_NAME`, optioneel `MCSD_SENDER_BGZ_BASE`).
+
+Voor PoC 11-13 geldt daarnaast:
+
+- `MCSD_SENDER_UZI_SYS` en `MCSD_SENDER_SYSTEM_NAME` zijn verplicht
+- `MCSD_SENDER_BGZ_PUBLIC_BASE` wordt gebruikt voor de publieke sender URL in de notification Task
+- `MCSD_SENDER_BGZ_STORAGE_BASE` wordt gebruikt voor de interne workflow-task opslag op de sender FHIR server
+- `MCSD_SENDER_BGZ_BASE` wordt alleen nog als legacy fallback gebruikt
 
 **SSRF-mitigatie:** de client geeft geen vrije `receiver_base` mee. In plaats daarvan resolveert de backend `receiver_notification_base` opnieuw via het mCSD-adresboek (`MCSD_BASE`) op basis van `receiver_target_ref` (en optioneel `receiver_org_ref`) door de PoC 9 capability mapping te gebruiken. Daarbij wordt een `Endpoint` gezocht met payloadType `Twiin-TA-notification`, waarna `Endpoint.address` wordt genormaliseerd naar een base (o.a. trailing `/` en eventuele `/Task` eraf) en vervolgens wordt gevalideerd als een http(s)-URL.
 

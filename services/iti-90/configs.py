@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     sender_uzi_sys: Optional[str] = Field(None, validation_alias="MCSD_SENDER_UZI_SYS")
     sender_system_name: Optional[str] = Field(None, validation_alias="MCSD_SENDER_SYSTEM_NAME")
     sender_bgz_base: Optional[str] = Field(None, validation_alias="MCSD_SENDER_BGZ_BASE")
+    sender_bgz_public_base: Optional[str] = Field(None, validation_alias="MCSD_SENDER_BGZ_PUBLIC_BASE")
+    sender_bgz_storage_base: Optional[str] = Field(None, validation_alias="MCSD_SENDER_BGZ_STORAGE_BASE")
     audit_hmac_key: Optional[str] = Field(None, validation_alias="MCSD_AUDIT_HMAC_KEY")
     allow_task_preview_in_production: bool = Field(False, validation_alias="MCSD_ALLOW_TASK_PREVIEW_IN_PRODUCTION")
     log_level: str = Field("INFO", validation_alias="MCSD_LOG_LEVEL")

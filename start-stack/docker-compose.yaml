@@ -58,6 +58,31 @@ services:
       - mcsd_update_client_net
     restart: unless-stopped
 
+  sender-bgz-gateway:
+    build:
+      context: ../services/sender-bgz-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    volumes:
+      - ../services/sender-bgz-gateway:/app
+    environment:
+      BGZ_GATEWAY_UPSTREAM_FHIR_BASE: http://hapi-notifiedpull-stu3:8082/fhir
+      BGZ_GATEWAY_NUTS_INTERNAL_BASE: http://nuts-node:8083
+      BGZ_GATEWAY_AUTHORIZATION_BASE_SYSTEM: https://sys.local/fhir/NamingSystem/task-authorization-base
+      BGZ_GATEWAY_PATIENT_IDENTIFIER_SYSTEM: http://fhir.nl/fhir/NamingSystem/bsn
+      BGZ_GATEWAY_MEDICAL_ROLE_VALUESET_URL: ${BGZ_GATEWAY_MEDICAL_ROLE_VALUESET_URL:-https://decor.nictiz.nl/pub/eoverdracht/e-overdracht-html-20120928T120000/vs-2.16.840.1.113883.2.4.15.111.html}
+      BGZ_GATEWAY_MEDICAL_ROLE_CODES: ${BGZ_GATEWAY_MEDICAL_ROLE_CODES:-}
+      BGZ_GATEWAY_REQUIRED_SCOPES: ${BGZ_GATEWAY_REQUIRED_SCOPES:-}
+    depends_on:
+      hapi-notifiedpull-stu3-health:
+        condition: service_healthy
+      nuts-node:
+        condition: service_started
+    networks:
+      - mcsd_update_client_net
+    restart: unless-stopped
+
   nuts-node:
     build:
       context: ../services/nuts-node
@@ -237,6 +262,7 @@ services:
     depends_on:
       - hapi-directory
       - nuts-node
+      - sender-bgz-gateway
     networks:
       mcsd_update_client_net:
         aliases:

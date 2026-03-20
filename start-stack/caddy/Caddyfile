@@ -4,20 +4,11 @@
     reverse_proxy nuts-node:8084
   }
 
-#  handle_path /notifiedpull/* {
-#    reverse_proxy hapi-notifiedpull-stu3:8082
-#  }
-
   handle_path /notifiedpull/* {
-    # NOTE: forward_auth requires a Caddy build with an auth_request/forward_auth plugin.
-    # The standard introspection endpoint returns 200 even for inactive tokens, so in
-    # production you should proxy to a small auth sidecar that returns 2xx only when
-    # the token is valid.
-    forward_auth nuts-node:8083 {
-      uri /internal/auth/v2/accesstoken/introspect
-      copy_headers Authorization
-    }
-    reverse_proxy hapi-notifiedpull-stu3:8082
+    # Sender-side protected resource serving now goes through the dedicated gateway.
+    # The gateway performs token introspection plus authorization-base / task / role checks
+    # before proxying to the internal sender HAPI instance.
+    reverse_proxy sender-bgz-gateway:8001
   }
 
   handle {

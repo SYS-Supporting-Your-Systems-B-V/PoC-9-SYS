@@ -2553,6 +2553,7 @@ IG_CAPABILITY_SYSTEM = "http://nuts-foundation.github.io/nl-generic-functions-ig
 
 # PoC 9 extension: explicit sender BgZ FHIR base URL for receivers that do not resolve sender endpoints via URA/mCSD.
 TASK_EXT_SENDER_BGZ_BASE_URL = "http://example.org/fhir/StructureDefinition/sender-bgz-base"
+TASK_IDENTIFIER_AUTHORIZATION_BASE_SYSTEM = "https://sys.local/fhir/NamingSystem/task-authorization-base"
 
 # NL Generic Functions: extensions to support routing references on FHIR STU3 Task
 # - Location for Task in STU3
@@ -2601,6 +2602,21 @@ def _validate_http_base_url(base: str, *, field_name: str = "base") -> str:
     if p.fragment:
         raise HTTPException(status_code=400, detail=f"Ongeldige {field_name}: fragment is niet toegestaan.")
     return b
+
+
+def _resolve_sender_bgz_bases() -> Tuple[Optional[str], Optional[str]]:
+    """Resolve public and internal sender BgZ bases.
+
+    Backward compatibility:
+    - `MCSD_SENDER_BGZ_BASE` remains the legacy fallback for both concerns.
+    - `MCSD_SENDER_BGZ_PUBLIC_BASE` is the externally discoverable sender URL.
+    - `MCSD_SENDER_BGZ_STORAGE_BASE` is the internal URL used to store/fetch data on the local sender FHIR server.
+    """
+
+    legacy = (getattr(settings, "sender_bgz_base", None) or "").strip() or None
+    public_base = (getattr(settings, "sender_bgz_public_base", None) or "").strip() or legacy
+    storage_base = (getattr(settings, "sender_bgz_storage_base", None) or "").strip() or legacy
+    return public_base, storage_base
 
 
 def _normalize_relative_ref(ref: Optional[str]) -> str:
@@ -3687,7 +3703,7 @@ def _build_bgz_notification_task(
     sender_name: str,
     sender_uzi_sys: str,
     sender_system_name: str,
-    sender_bgz_base: str | None,
+    sender_bgz_public_base: str | None,
     authorization_base: str,
     receiver_ura: str,
     receiver_name: str,
@@ -3733,10 +3749,13 @@ def _build_bgz_notification_task(
     # Requester: sending system (agent) and organization (onBehalfOf)
     tb.set_requester_agent(uzi_sys=sender_uzi_sys, system_name=sender_system_name)
     tb.set_sender(ura=sender_ura, display=sender_name)
-    sender_bgz_base_norm = _normalize_fhir_base(sender_bgz_base) if sender_bgz_base else ""
-    if sender_bgz_base_norm:
-        sender_bgz_base_norm = _validate_http_base_url(sender_bgz_base_norm, field_name="sender_bgz_base")
-        tb.set_sender_bgz_base_extension(ext_url=TASK_EXT_SENDER_BGZ_BASE_URL, base_url=sender_bgz_base_norm)
+    sender_bgz_public_base_norm = _normalize_fhir_base(sender_bgz_public_base) if sender_bgz_public_base else ""
+    if sender_bgz_public_base_norm:
+        sender_bgz_public_base_norm = _validate_http_base_url(
+            sender_bgz_public_base_norm,
+            field_name="sender_bgz_public_base",
+        )
+        tb.set_sender_bgz_base_extension(ext_url=TASK_EXT_SENDER_BGZ_BASE_URL, base_url=sender_bgz_public_base_norm)
     tb.set_receiver_owner_identifier(ura=receiver_ura)
 
     receiver_org_name_norm = (receiver_org_name or "").strip()
@@ -3830,12 +3849,13 @@ def _build_bgz_notification_task(
     tb.set_get_workflow_task(True)
     _keep_task_inputs(task=tb.task, allowed_taskparameter_codes={"authorization-base", "get-workflow-task"})
     task = tb.build()
-    return task, (sender_bgz_base_norm or None), workflow_task_id_norm
+    return task, (sender_bgz_public_base_norm or None), workflow_task_id_norm
 
 def _build_bgz_workflow_task(
     *,
     workflow_task_id: str,
     group_identifier: str,
+    authorization_base: str,
     sender_ura: str,
     sender_name: str,
     sender_uzi_sys: str,
@@ -3852,6 +3872,22 @@ def _build_bgz_workflow_task(
     if group_identifier:
         tb.set_group_identifier(str(group_identifier))
     tb.set_task_identifier(f"urn:uuid:{uuid.uuid4()}")
+    tb.set_authorization_base(str(authorization_base))
+    identifier_list = _ensure_list(tb.task, "identifier")
+    identifier_list[:] = [
+        ident
+        for ident in identifier_list
+        if not (
+            isinstance(ident, dict)
+            and str(ident.get("system") or "") == TASK_IDENTIFIER_AUTHORIZATION_BASE_SYSTEM
+        )
+    ]
+    identifier_list.append(
+        {
+            "system": TASK_IDENTIFIER_AUTHORIZATION_BASE_SYSTEM,
+            "value": str(authorization_base),
+        }
+    )
     now = datetime.now(timezone.utc)
     tb.set_authored_on(now)
     tb.set_restriction_end(now + timedelta(days=365))
@@ -4319,7 +4355,7 @@ async def bgz_task_preview(payload: BgzNotifyRequest = Body(...)):
     sender_name = (settings.sender_name or "").strip()
     sender_uzi_sys = (settings.sender_uzi_sys or "").strip()
     sender_system_name = (settings.sender_system_name or "").strip()
-    sender_bgz_base = (settings.sender_bgz_base or "").strip() or None
+    sender_bgz_public_base, _sender_bgz_storage_base = _resolve_sender_bgz_bases()
 
     if not sender_ura or not sender_name:
         raise HTTPException(
@@ -4382,7 +4418,7 @@ async def bgz_task_preview(payload: BgzNotifyRequest = Body(...)):
         sender_name=sender_name,
         sender_uzi_sys=sender_uzi_sys,
         sender_system_name=sender_system_name,
-        sender_bgz_base=sender_bgz_base,
+        sender_bgz_public_base=sender_bgz_public_base,
         authorization_base=authorization_base,
         receiver_ura=resolved_receiver_ura,
         receiver_name=receiver_name,
@@ -4443,7 +4479,7 @@ async def bgz_notify(payload: BgzNotifyRequest = Body(...)):
     sender_name = (settings.sender_name or "").strip()
     sender_uzi_sys = (settings.sender_uzi_sys or "").strip()
     sender_system_name = (settings.sender_system_name or "").strip()
-    sender_bgz_base = (settings.sender_bgz_base or "").strip() or None
+    sender_bgz_public_base, sender_bgz_storage_base = _resolve_sender_bgz_bases()
 
     if not sender_ura or not sender_name:
         raise HTTPException(
@@ -4501,7 +4537,7 @@ async def bgz_notify(payload: BgzNotifyRequest = Body(...)):
         sender_name=sender_name,
         sender_uzi_sys=sender_uzi_sys,
         sender_system_name=sender_system_name,
-        sender_bgz_base=sender_bgz_base,
+        sender_bgz_public_base=sender_bgz_public_base,
         authorization_base=authorization_base,
         receiver_ura=resolved_receiver_ura,
         receiver_name=receiver_name,
@@ -4522,15 +4558,24 @@ async def bgz_notify(payload: BgzNotifyRequest = Body(...)):
         workflow_task_id=payload.workflow_task_id,
     )
 
-    if not sender_bgz_base_norm:
+    sender_bgz_storage_base_norm = _normalize_fhir_base(sender_bgz_storage_base) if sender_bgz_storage_base else ""
+    if not sender_bgz_storage_base_norm:
         raise HTTPException(
             status_code=500,
-            detail={"reason": "misconfigured", "message": "MCSD_SENDER_BGZ_BASE is niet ingesteld; dit is nodig om de Workflow Task te hosten."},
+            detail={
+                "reason": "misconfigured",
+                "message": (
+                    "MCSD_SENDER_BGZ_STORAGE_BASE is niet ingesteld "
+                    "(of legacy fallback MCSD_SENDER_BGZ_BASE ontbreekt); "
+                    "dit is nodig om de Workflow Task te hosten."
+                ),
+            },
         )
     task_group_identifier = (task.get("groupIdentifier") or {}).get("value") or ""
     workflow_task = _build_bgz_workflow_task(
         workflow_task_id=workflow_task_id_norm,
         group_identifier=task_group_identifier,
+        authorization_base=authorization_base,
         sender_ura=sender_ura,
         sender_name=sender_name,
         sender_uzi_sys=sender_uzi_sys,
@@ -4540,7 +4585,10 @@ async def bgz_notify(payload: BgzNotifyRequest = Body(...)):
         patient_name=patient_name,
         description=description,
     )
-    workflow_task_id_actual = await _upsert_workflow_task_to_sender_bgz(sender_bgz_base=sender_bgz_base_norm, workflow_task=workflow_task)
+    workflow_task_id_actual = await _upsert_workflow_task_to_sender_bgz(
+        sender_bgz_base=sender_bgz_storage_base_norm,
+        workflow_task=workflow_task,
+    )
     if workflow_task_id_actual and workflow_task_id_actual != workflow_task_id_norm:
         workflow_task_id_norm = workflow_task_id_actual
         try:
