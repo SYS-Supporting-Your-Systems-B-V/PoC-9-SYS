@@ -167,6 +167,7 @@ PROVENANCE_PARTICIPANT_TYPE_AUTHOR = "author"
 # Default NL GF Data Exchange Capabilities code system (for Endpoint.payloadType)
 NL_GF_DATA_EXCHANGE_CAPABILITIES_SYSTEM = "http://nuts-foundation.github.io/nl-generic-functions-ig/CodeSystem/nl-gf-data-exchange-capabilities"
 BGZ_SERVER_CAPABILITIES_CODE = "http://nictiz.nl/fhir/CapabilityStatement/bgz2017-servercapabilities"
+TWIIN_TA_NOTIFICATION_CODE = "Twiin-TA-notification"
 
 # NL GF profile of the IHE mCSD ITI-91 endpoint (Care Services Directory Update)
 # ("Administration Directory for Update Client" in the NL Generic Functions IG)
@@ -1207,6 +1208,21 @@ def _init_sqlite_schema(conn: Connection, seed: bool = True, reset_seed: bool = 
         None, None, None,
         "application/fhir+json",
         "https://mach2.disyepd.com/notifiedpull/fhir", "FHIR API", "+31-20-0000000", "fhir@demo.invalid",
+        "2020-01-01", None, 1, now
+    ))
+    # Dedicated receiver notification endpoint for local self-tests of the sender flow
+    conn.exec_driver_sql("""INSERT INTO tblEndpoint (
+        endpointkey, kliniekkey, locatiekey, afdelingkey,
+        status, connectionTypeSystemUri, connectionTypeCode, connectionTypeDisplay,
+        payloadTypeSystemUri, payloadTypeCode, payloadTypeDisplay, payloadMimeType,
+        adres, naam, telefoon, email,
+        ingangsdatum, einddatum, actief, LaatstGewijzigdOp
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+        902, 1, None, None,
+        "active", ENDPOINT_CONN_SYSTEM, "hl7-fhir-rest", "HL7 FHIR REST",
+        NL_GF_DATA_EXCHANGE_CAPABILITIES_SYSTEM, TWIIN_TA_NOTIFICATION_CODE, "Twiin TA Notification endpoint",
+        "application/fhir+json",
+        "https://mach2.disyepd.com/receiver-mock/fhir", "Mock Notification Receiver", None, None,
         "2020-01-01", None, 1, now
     ))
     # OAuth endpoint for the Authentication Server (nuts-node)

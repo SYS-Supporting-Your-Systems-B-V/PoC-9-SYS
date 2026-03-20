@@ -83,6 +83,20 @@ services:
       - mcsd_update_client_net
     restart: unless-stopped
 
+  mock-notification-receiver:
+    build:
+      context: ../services/mock-notification-receiver
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    volumes:
+      - ../services/mock-notification-receiver:/app
+    environment:
+      MOCK_RECEIVER_PUBLIC_BASE: https://${PUBLIC_DOMAIN:-mach2.disyepd.com}/receiver-mock/fhir
+    networks:
+      - mcsd_update_client_net
+    restart: unless-stopped
+
   nuts-node:
     build:
       context: ../services/nuts-node
@@ -263,6 +277,7 @@ services:
       - hapi-directory
       - nuts-node
       - sender-bgz-gateway
+      - mock-notification-receiver
     networks:
       mcsd_update_client_net:
         aliases:

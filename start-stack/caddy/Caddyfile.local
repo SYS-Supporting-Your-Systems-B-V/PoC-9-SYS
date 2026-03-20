@@ -4,6 +4,10 @@
     reverse_proxy nuts-node:8084
   }
 
+  handle_path /receiver-mock/* {
+    reverse_proxy mock-notification-receiver:8002
+  }
+
   handle_path /notifiedpull/* {
     reverse_proxy sender-bgz-gateway:8001
   }
