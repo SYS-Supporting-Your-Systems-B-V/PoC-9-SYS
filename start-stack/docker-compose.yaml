@@ -51,9 +51,12 @@ services:
       - "8000:8000"
     volumes:
       - ../services/iti-90:/app
+      - caddy_data:/caddy-data:ro
     depends_on:
       hapi-directory-health:
         condition: service_healthy
+      caddy:
+        condition: service_started
     networks:
       - mcsd_update_client_net
     restart: unless-stopped
