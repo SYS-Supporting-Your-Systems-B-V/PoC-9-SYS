@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     bearer_token: Optional[str] = Field(None, validation_alias="MCSD_BEARER_TOKEN")
     verify_tls: bool = Field(True, validation_alias="MCSD_VERIFY_TLS")
     ca_certs_file: Optional[str] = Field(None, validation_alias="MCSD_CA_CERTS_FILE")
+    nuts_internal_base: str = Field("http://nuts-node:8083", validation_alias="MCSD_NUTS_INTERNAL_BASE")
+    sender_nuts_subject_id: Optional[str] = Field(None, validation_alias="MCSD_SENDER_NUTS_SUBJECT_ID")
+    receiver_notification_scope: str = Field(
+        "eOverdracht-receiver",
+        validation_alias="MCSD_RECEIVER_NOTIFICATION_SCOPE",
+    )
+    receiver_token_timeout: float = Field(10.0, validation_alias="MCSD_RECEIVER_TOKEN_TIMEOUT")
     allow_origins: Optional[str] = Field("*", validation_alias="MCSD_ALLOW_ORIGINS")
     allowed_hosts: Optional[str] = Field("*", validation_alias="MCSD_ALLOWED_HOSTS")
     api_key: Optional[str] = Field(None, validation_alias="MCSD_API_KEY")

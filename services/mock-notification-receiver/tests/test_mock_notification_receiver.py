@@ -28,6 +28,55 @@ def _import_app_module():
 def _set_settings(monkeypatch, appmod) -> None:
     monkeypatch.setattr(appmod.settings, "public_base", "https://mach2.disyepd.com/receiver-mock/fhir", raising=False)
     monkeypatch.setattr(appmod.settings, "default_task_status", "requested", raising=False)
+    monkeypatch.setattr(appmod.settings, "require_bearer_token", True, raising=False)
+    monkeypatch.setattr(appmod.settings, "required_scope", "eOverdracht-receiver", raising=False)
+
+
+def _task_payload(sender_ura: str = "12345678") -> dict:
+    return {
+        "resourceType": "Task",
+        "status": "requested",
+        "basedOn": [{"reference": "Task/wf-123"}],
+        "requester": {
+            "onBehalfOf": {
+                "identifier": {
+                    "system": "http://fhir.nl/fhir/NamingSystem/ura",
+                    "value": sender_ura,
+                }
+            }
+        },
+        "owner": {
+            "identifier": {
+                "system": "http://fhir.nl/fhir/NamingSystem/ura",
+                "value": "87654321",
+            }
+        },
+        "for": {
+            "identifier": {
+                "system": "http://fhir.nl/fhir/NamingSystem/bsn",
+                "value": "999999990",
+            }
+        },
+        "input": [
+            {
+                "type": {
+                    "coding": [
+                        {
+                            "system": "http://fhir.nl/fhir/NamingSystem/TaskParameter",
+                            "code": "authorization-base",
+                        }
+                    ]
+                },
+                "valueString": "auth-123",
+            }
+        ],
+        "extension": [
+            {
+                "url": "http://example.org/fhir/StructureDefinition/sender-bgz-base",
+                "valueUrl": "https://mach2.disyepd.com/notifiedpull/fhir",
+            }
+        ],
+    }
 
 
 def test_metadata_advertises_task_create(monkeypatch):
@@ -42,51 +91,39 @@ def test_metadata_advertises_task_create(monkeypatch):
     assert any(item["code"] == "create" for item in interactions)
 
 
+def test_post_task_requires_bearer_token(monkeypatch):
+    appmod = _import_app_module()
+    _set_settings(monkeypatch, appmod)
+
+    with TestClient(appmod.app) as client:
+        response = client.post("/fhir/Task", json=_task_payload())
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["reason"] == "missing_bearer_token"
+
+
 def test_post_task_is_stored_and_summarized(monkeypatch):
     appmod = _import_app_module()
     _set_settings(monkeypatch, appmod)
+
+    async def _fake_introspect(_token: str):
+        return appmod.TokenContext(
+            raw={},
+            active=True,
+            organization_ura="12345678",
+            scopes=["eOverdracht-receiver"],
+        )
+
+    monkeypatch.setattr(appmod, "_introspect_token", _fake_introspect)
+
     with TestClient(appmod.app) as client:
         reset = client.delete("/debug/tasks")
         assert reset.status_code == 200
 
         response = client.post(
             "/fhir/Task",
-            json={
-                "resourceType": "Task",
-                "status": "requested",
-                "basedOn": [{"reference": "Task/wf-123"}],
-                "owner": {
-                    "identifier": {
-                        "system": "http://fhir.nl/fhir/NamingSystem/ura",
-                        "value": "87654321",
-                    }
-                },
-                "for": {
-                    "identifier": {
-                        "system": "http://fhir.nl/fhir/NamingSystem/bsn",
-                        "value": "999999990",
-                    }
-                },
-                "input": [
-                    {
-                        "type": {
-                            "coding": [
-                                {
-                                    "system": "http://fhir.nl/fhir/NamingSystem/TaskParameter",
-                                    "code": "authorization-base",
-                                }
-                            ]
-                        },
-                        "valueString": "auth-123",
-                    }
-                ],
-                "extension": [
-                    {
-                        "url": "http://example.org/fhir/StructureDefinition/sender-bgz-base",
-                        "valueUrl": "https://mach2.disyepd.com/notifiedpull/fhir",
-                    }
-                ],
-            },
+            json=_task_payload(),
+            headers={"Authorization": "Bearer test-token"},
         )
 
         assert response.status_code == 201, response.text
@@ -102,6 +139,7 @@ def test_post_task_is_stored_and_summarized(monkeypatch):
         assert summary["sender_bgz_base"] == "https://mach2.disyepd.com/notifiedpull/fhir"
         assert summary["owner_ura"] == "87654321"
         assert summary["patient_bsn"] == "999999990"
+        assert summary["sender_ura"] == "12345678"
 
         task_read = client.get(f"/fhir/Task/{created['id']}")
         assert task_read.status_code == 200
@@ -112,3 +150,28 @@ def test_post_task_is_stored_and_summarized(monkeypatch):
         bundle = task_search.json()
         assert bundle["resourceType"] == "Bundle"
         assert bundle["total"] == 1
+
+
+def test_post_task_rejects_when_token_organization_does_not_match_task(monkeypatch):
+    appmod = _import_app_module()
+    _set_settings(monkeypatch, appmod)
+
+    async def _fake_introspect(_token: str):
+        return appmod.TokenContext(
+            raw={},
+            active=True,
+            organization_ura="99999999",
+            scopes=["eOverdracht-receiver"],
+        )
+
+    monkeypatch.setattr(appmod, "_introspect_token", _fake_introspect)
+
+    with TestClient(appmod.app) as client:
+        response = client.post(
+            "/fhir/Task",
+            json=_task_payload(sender_ura="12345678"),
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["reason"] == "organization_not_authorized"

@@ -149,6 +149,9 @@ Voor PoC 11-13 gebruikt deze repo nu liever de split sender-configuratie:
 - `MCSD_SENDER_BGZ_PUBLIC_BASE` bepaalt welke publieke sender BgZ/FHIR base in de notification Task terechtkomt
 - `MCSD_SENDER_BGZ_STORAGE_BASE` bepaalt waar SYS lokaal de workflow task opslaat op de sender FHIR server
 - `MCSD_SENDER_BGZ_BASE` blijft alleen nog als legacy fallback bestaan als de split variabelen niet zijn gezet
+- `MCSD_NUTS_INTERNAL_BASE` bepaalt welke lokale Nuts internal API wordt gebruikt om een receiver access token aan te vragen
+- `MCSD_SENDER_NUTS_SUBJECT_ID` is optioneel; als die leeg is gebruikt SYS `MCSD_SENDER_URA` als Nuts subject-id
+- `MCSD_RECEIVER_NOTIFICATION_SCOPE` bepaalt welke scope wordt aangevraagd voor het receiver notification endpoint (default `eOverdracht-receiver`)
 
 Voorbeeld:
 
@@ -441,6 +444,8 @@ Voor PoC 11-13 geldt daarnaast:
 - `MCSD_SENDER_BGZ_BASE` wordt alleen nog als legacy fallback gebruikt
 
 **SSRF-mitigatie:** de client geeft geen vrije `receiver_base` mee. In plaats daarvan resolveert de backend `receiver_notification_base` opnieuw via het mCSD-adresboek (`MCSD_BASE`) op basis van `receiver_target_ref` (en optioneel `receiver_org_ref`) door de PoC 9 capability mapping te gebruiken. Daarbij wordt een `Endpoint` gezocht met payloadType `Twiin-TA-notification`, waarna `Endpoint.address` wordt genormaliseerd naar een base (o.a. trailing `/` en eventuele `/Task` eraf) en vervolgens wordt gevalideerd als een http(s)-URL.
+
+**Receiver-authenticatie:** vóór het posten van de notification Task vraagt SYS via de lokale Nuts internal API een access token aan voor het door mCSD ontdekte `Nuts-OAuth` endpoint van de receiver. Als er geen receiver OAuth endpoint gevonden wordt of de tokenaanvraag faalt, wordt de notificatie niet zonder authenticatie verstuurd maar hard gefaald.
 
 Audit logging: bij elke poging en uitkomst van `POST /bgz/notify` wordt een audit event gelogd via logger `mcsd.audit` (zie Observability / audit logging).
 

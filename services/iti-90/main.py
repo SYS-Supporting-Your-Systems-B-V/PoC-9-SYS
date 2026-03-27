@@ -24,7 +24,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from typing import Dict, Any, List, Optional, Tuple, Literal
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import Field, BaseModel
@@ -463,6 +463,119 @@ def _auth_headers() -> Dict[str, str]:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return headers
+
+
+def _extract_receiver_auth_server_url(mapping: Dict[str, Any]) -> str:
+    chosen = ((((mapping or {}).get("mapping") or {}).get("nuts_oauth") or {}).get("chosen") or {})
+    raw = str(chosen.get("address") or chosen.get("base") or "").strip()
+    if not raw:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "no_receiver_oauth_endpoint",
+                "message": (
+                    "Geen Nuts-OAuth endpoint gevonden voor het gekozen receiver target/organisatie. "
+                    "De receiver moet een OAuth endpoint publiceren voordat notificaties veilig verzonden kunnen worden."
+                ),
+            },
+        )
+    return _validate_http_base_url(raw, field_name="receiver_oauth_endpoint")
+
+
+async def _request_receiver_access_token(*, mapping: Dict[str, Any], sender_subject_id: str) -> str:
+    subject_id = str(sender_subject_id or "").strip()
+    if not subject_id:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "reason": "misconfigured",
+                "message": "Geen Nuts subject-id beschikbaar voor de sender tokenaanvraag.",
+            },
+        )
+
+    auth_server_url = _extract_receiver_auth_server_url(mapping)
+    nuts_internal_base = _validate_http_base_url(
+        str(settings.nuts_internal_base or "").strip(),
+        field_name="nuts_internal_base",
+    )
+    request_url = (
+        f"{nuts_internal_base.rstrip('/')}/internal/v2/auth/"
+        f"{quote(subject_id, safe='')}/request-service-access-token"
+    )
+    scope = str(settings.receiver_notification_scope or "").strip() or "eOverdracht-receiver"
+    payload = {
+        "authorization_server": auth_server_url,
+        "scope": scope,
+        "token_type": "Bearer",
+    }
+
+    try:
+        response = await app.state.http_client.post(
+            request_url,
+            json=payload,
+            headers={"Accept": "application/json"},
+            timeout=float(settings.receiver_token_timeout or 10.0),
+        )
+    except httpx.RequestError as exc:
+        info = _classify_upstream_exception(exc)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "reason": "receiver_access_token_request_failed",
+                "message": "Het aanvragen van een receiver access token via Nuts is mislukt.",
+                "details": {
+                    "classification": info.get("reason"),
+                    "nuts_internal_base": nuts_internal_base,
+                    "authorization_server": auth_server_url,
+                },
+            },
+        ) from exc
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "reason": "receiver_access_token_request_failed",
+                "message": "De Nuts node gaf een fout terug bij het aanvragen van een receiver access token.",
+                "details": {
+                    "status_code": int(response.status_code),
+                    "nuts_internal_base": nuts_internal_base,
+                    "authorization_server": auth_server_url,
+                    "upstream_body": str(getattr(response, "text", "") or "")[:500] or None,
+                },
+            },
+        )
+
+    try:
+        payload_json = response.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "reason": "receiver_access_token_invalid_json",
+                "message": "De Nuts node gaf geen geldige JSON terug voor de receiver tokenaanvraag.",
+            },
+        ) from exc
+
+    if not isinstance(payload_json, dict):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "reason": "receiver_access_token_invalid_json",
+                "message": "De Nuts node gaf geen JSON object terug voor de receiver tokenaanvraag.",
+            },
+        )
+
+    access_token = str(payload_json.get("access_token") or "").strip()
+    if not access_token:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "reason": "receiver_access_token_missing",
+                "message": "De Nuts node response bevat geen access_token voor de receiver notification endpoint.",
+            },
+        )
+    return access_token
 
 def _classify_upstream_exception(e: Exception) -> dict:
     # Bepaal hoofdreden van failure op de upstream-verbinding
@@ -3539,7 +3652,7 @@ async def _resolve_bgz_notify_destination(
     mapping = await poc9_msz_capability_mapping(
         target=receiver_target_ref_norm,
         organization=receiver_org_ref_norm or None,
-        include_oauth=False,
+        include_oauth=True,
         limit=200,
     )
     resolved_notification_endpoint_id = None
@@ -4520,6 +4633,11 @@ async def bgz_notify(payload: BgzNotifyRequest = Body(...)):
         receiver_org_ref=receiver_org_ref,
         receiver_notification_endpoint_id=receiver_notification_endpoint_id,
     )
+    sender_subject_id = (settings.sender_nuts_subject_id or sender_ura).strip()
+    receiver_access_token = await _request_receiver_access_token(
+        mapping=mapping,
+        sender_subject_id=sender_subject_id,
+    )
 
     if client_receiver_ura and client_receiver_ura != resolved_receiver_ura:
         logger.warning(
@@ -4620,7 +4738,11 @@ async def bgz_notify(payload: BgzNotifyRequest = Body(...)):
         response = await app.state.http_client.post(
             target_url,
             json=task,
-            headers={"Content-Type": "application/fhir+json", "Accept": "application/fhir+json"},
+            headers={
+                "Content-Type": "application/fhir+json",
+                "Accept": "application/fhir+json",
+                "Authorization": f"Bearer {receiver_access_token}",
+            },
         )
         response.raise_for_status()
         result = response.json()

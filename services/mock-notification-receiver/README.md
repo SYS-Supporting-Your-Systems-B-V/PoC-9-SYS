@@ -11,7 +11,7 @@ Responsibilities:
 
 It is intentionally not a real receiver implementation:
 
-- no authentication
+- receiver-side auth is limited to bearer-token introspection plus `organization_ura` matching against `Task.requester.onBehalfOf.identifier.value`
 - no signature or credential verification
 - no FHIR profile validation
 - no receiver-side workflow processing
@@ -32,3 +32,11 @@ Default public base:
 - `https://mach2.disyepd.com/receiver-mock/fhir`
 
 This path is meant for local self-tests where `iti-90` should discover a `Twiin-TA-notification` endpoint and successfully deliver a notification task without hitting the protected sender gateway route.
+
+Current notification authorization behavior:
+
+- `POST /fhir/Task` requires `Authorization: Bearer ...` by default
+- the bearer token is introspected via the local Nuts node (`/internal/auth/v2/accesstoken/introspect`)
+- the introspection result must contain `organization_ura`
+- the token `organization_ura` must match `Task.requester.onBehalfOf.identifier.value`
+- the token must include the configured receiver scope (default `eOverdracht-receiver`)

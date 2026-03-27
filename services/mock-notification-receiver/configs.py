@@ -17,6 +17,10 @@ class Settings(BaseSettings):
         validation_alias="MOCK_RECEIVER_PUBLIC_BASE",
     )
     default_task_status: str = Field("requested", validation_alias="MOCK_RECEIVER_DEFAULT_TASK_STATUS")
+    require_bearer_token: bool = Field(True, validation_alias="MOCK_RECEIVER_REQUIRE_BEARER_TOKEN")
+    nuts_internal_base: str = Field("http://nuts-node:8083", validation_alias="MOCK_RECEIVER_NUTS_INTERNAL_BASE")
+    introspection_timeout: float = Field(10.0, validation_alias="MOCK_RECEIVER_INTROSPECTION_TIMEOUT")
+    required_scope: str = Field("eOverdracht-receiver", validation_alias="MOCK_RECEIVER_REQUIRED_SCOPE")
     log_level: str = Field("INFO", validation_alias="MOCK_RECEIVER_LOG_LEVEL")
     model_config = SettingsConfigDict(case_sensitive=False)
 

@@ -267,8 +267,16 @@ class FakeHttpClient:
             return self._put_responses.pop(0)
         return self._next_put_response
 
-    async def post(self, url: str, *, json: Any = None, headers: Optional[Dict[str, str]] = None):
-        self.post_calls.append({"url": url, "json": json, "headers": headers or {}})
+    async def post(
+        self,
+        url: str,
+        *,
+        json: Any = None,
+        data: Any = None,
+        headers: Optional[Dict[str, str]] = None,
+        timeout: Optional[float] = None,
+    ):
+        self.post_calls.append({"url": url, "json": json, "data": data, "headers": headers or {}, "timeout": timeout})
         if self._post_responses:
             return self._post_responses.pop(0)
         return self._next_post_response
@@ -765,6 +773,13 @@ def test_bgz_notify_posts_task_and_returns_result(appmod, client, monkeypatch):
         return (
             {
                 "organization": {"reference": "Organization/org-1", "display": "Ziekenhuis Oost"},
+                "mapping": {
+                    "nuts_oauth": {
+                        "chosen": {
+                            "address": "https://receiver.example/nuts-oauth2",
+                        }
+                    }
+                },
             },
             "https://receiver.example/fhir",
             "ep-1",
@@ -777,6 +792,7 @@ def test_bgz_notify_posts_task_and_returns_result(appmod, client, monkeypatch):
     monkeypatch.setattr(appmod, "_resolve_bgz_notify_destination", _fake_resolve)
 
     fake = FakeHttpClient()
+    fake.queue_post_response(DummyResponse(200, {"access_token": "receiver-token"}))
     fake.queue_post_response(DummyResponse(201, {"resourceType": "Task", "id": "task-123", "status": "requested"}))
     monkeypatch.setattr(appmod.app.state, "http_client", fake, raising=False)
 
@@ -805,10 +821,19 @@ def test_bgz_notify_posts_task_and_returns_result(appmod, client, monkeypatch):
     assert body["task_status"] == "requested"
     assert body.get("workflow_task_id") == "wf-777"
 
-    assert len(fake.post_calls) == 1
-    post = fake.post_calls[0]
+    assert len(fake.post_calls) == 2
+    token_post = fake.post_calls[0]
+    assert token_post["url"] == "http://nuts-node:8083/internal/v2/auth/12345678/request-service-access-token"
+    assert token_post["json"] == {
+        "authorization_server": "https://receiver.example/nuts-oauth2",
+        "scope": "eOverdracht-receiver",
+        "token_type": "Bearer",
+    }
+
+    post = fake.post_calls[1]
     assert post["url"] == "https://receiver.example/fhir/Task"
     assert post["headers"].get("Content-Type") == "application/fhir+json"
+    assert post["headers"].get("Authorization") == "Bearer receiver-token"
 
     sent_task = post["json"]
     assert_task_matches_notification_template(
@@ -836,6 +861,13 @@ def test_bgz_notify_uses_public_base_and_storage_base_and_persists_authorization
         return (
             {
                 "organization": {"reference": "Organization/org-1", "display": "Ziekenhuis Oost"},
+                "mapping": {
+                    "nuts_oauth": {
+                        "chosen": {
+                            "address": "https://receiver.example/nuts-oauth2",
+                        }
+                    }
+                },
             },
             "https://receiver.example/fhir",
             "ep-1",
@@ -852,6 +884,7 @@ def test_bgz_notify_uses_public_base_and_storage_base_and_persists_authorization
 
     fake = FakeHttpClient()
     fake.queue_put_response(DummyResponse(200, {"resourceType": "Task", "id": "wf-777", "status": "requested"}))
+    fake.queue_post_response(DummyResponse(200, {"access_token": "receiver-token"}))
     fake.queue_post_response(DummyResponse(201, {"resourceType": "Task", "id": "task-123", "status": "requested"}))
     monkeypatch.setattr(appmod.app.state, "http_client", fake, raising=False)
 
@@ -888,8 +921,11 @@ def test_bgz_notify_uses_public_base_and_storage_base_and_persists_authorization
     assert auth_input is not None
     assert auth_input["valueString"] == auth_identifier["value"]
 
-    assert len(fake.post_calls) == 1
-    notification_task = fake.post_calls[0]["json"]
+    assert len(fake.post_calls) == 2
+    assert fake.post_calls[0]["url"] == "http://nuts-node:8083/internal/v2/auth/12345678/request-service-access-token"
+
+    notification_task = fake.post_calls[1]["json"]
+    assert fake.post_calls[1]["headers"].get("Authorization") == "Bearer receiver-token"
     sender_bgz_ext = _find_task_extension(
         notification_task,
         "http://example.org/fhir/StructureDefinition/sender-bgz-base",

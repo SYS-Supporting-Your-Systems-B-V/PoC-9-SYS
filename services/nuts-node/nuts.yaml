@@ -4,6 +4,10 @@ url: https://__PUBLIC_DOMAIN__/nuts-oauth2
 datadir: /data
 didmethods: [web]
 
+auth:
+  authorizationendpoint:
+    enabled: true
+
 http:
   public:
     address: :8084
