@@ -1,4 +1,5 @@
 https://github.com/nuts-foundation/nuts-knooppunt/issues/301
+https://github.com/nuts-foundation/nl-generic-functions-ig/discussions/72
 https://build.fhir.org/ig/nuts-foundation/nl-generic-functions-ig/care-services.html
 https://build.fhir.org/ig/nuts-foundation/nl-generic-functions-ig/CodeSystem-nl-gf-wlz-zorgprofielen-cs.html
 https://build.fhir.org/ig/nuts-foundation/nl-generic-functions-ig/Bundle-query-directory.html
@@ -18,3 +19,7 @@ https://profiles.ihe.net/ITI/mCSD/StructureDefinition-IHE.mCSD.OrganizationAffil
 https://profiles.ihe.net/ITI/mCSD/StructureDefinition-IHE.mCSD.OrganizationAffiliation.DocShare.html
 https://www.twiin.nl/tanp
 https://build.fhir.org/ig/nuts-foundation/nl-generic-functions-ig/branches/TA-routering-update-examples-eOverdracht/routing.html#mcsd-based-directory-lookup
+
+https://profiles.ihe.net/ITI/mCSD/ITI-90.html
+https://profiles.ihe.net/ITI/mCSD/ITI-91.html
+https://profiles.ihe.net/ITI/mCSD/ITI-130.html

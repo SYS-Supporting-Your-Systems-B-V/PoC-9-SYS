@@ -1,20 +1,31 @@
-# generate fake UZI certs via Docker (no local toolkit install)
-$ CERTS_DIR="/home/yob/PoC-9-SYS/services/nuts-node/local-dev/test"
-$ mkdir -p "$CERTS_DIR"
+# Fake UZI Cert Creation
 
-# copy the test_ca template from the image into your host folder and issue the certs there
-$ docker run --rm \
-  -v "$CERTS_DIR:/work" \
-  -w /work \
-  alpine:3.19 \
-  sh -lc '
-    apk add --no-cache bash openssl git
-    git clone --depth 1 https://github.com/nuts-foundation/go-didx509-toolkit.git /tmp/toolkit
-    cd /tmp/toolkit/test_ca
-    bash ./issue-cert.sh mach2.disyepd.com "ZBC Demo Kliniek" "Locality" 00000000000 00000000 00700700
-    cp -v /tmp/toolkit/test_ca/out/* /work
-  '
+Use `services/nuts-node/certs/create_fake_UZI_cert.md` as the canonical guide.
 
+Short version for local Windows use from the repo root:
 
-# create x.509 credential which must be added to the DID
-$ docker run --rm -v "$CERTS_DIR:/certs" nutsfoundation/go-didx509-toolkit:1.1.0 vc /certs/mach2.disyepd.com-chain.pem /certs/mach2.disyepd.com.key "CN=Fake UZI Root CA" did:web:localhost%3A8083:iam:3f91f049-b385-4351-bba5-e192bd1b3ab6
+```powershell
+$certs = (Resolve-Path 'services/nuts-node/certs').Path
+docker run --rm `
+  -v "${certs}:/certs" `
+  nutsfoundation/go-didx509-toolkit:1.1.0 `
+  vc `
+  /certs/mach2.disyepd.com-chain.pem `
+  /certs/mach2.disyepd.com.key `
+  "CN=Fake UZI Root CA" `
+  "did:web:mach2.disyepd.com:nuts-oauth2:iam:e21b9338-1f61-4a6b-9e28-866871d7c8a0"
+```
+
+If you use Git Bash instead of PowerShell:
+
+```bash
+CERTS_DIR="$(pwd -W)/services/nuts-node/certs"
+MSYS_NO_PATHCONV=1 docker run --rm \
+  -v "${CERTS_DIR}:/certs" \
+  nutsfoundation/go-didx509-toolkit:1.1.0 \
+  vc \
+  /certs/mach2.disyepd.com-chain.pem \
+  /certs/mach2.disyepd.com.key \
+  "CN=Fake UZI Root CA" \
+  "did:web:mach2.disyepd.com:nuts-oauth2:iam:e21b9338-1f61-4a6b-9e28-866871d7c8a0"
+```
