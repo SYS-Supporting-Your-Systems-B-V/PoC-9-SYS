@@ -1,4 +1,5 @@
 import importlib.util
+from urllib.parse import parse_qs, urlparse
 import sys
 from pathlib import Path
 
@@ -26,10 +27,16 @@ def _import_app_module():
 
 
 def _set_settings(monkeypatch, appmod) -> None:
+    monkeypatch.setattr(appmod.settings, "public_root", "https://mach2.disyepd.com/receiver-mock", raising=False)
     monkeypatch.setattr(appmod.settings, "public_base", "https://mach2.disyepd.com/receiver-mock/fhir", raising=False)
     monkeypatch.setattr(appmod.settings, "default_task_status", "requested", raising=False)
     monkeypatch.setattr(appmod.settings, "require_bearer_token", True, raising=False)
     monkeypatch.setattr(appmod.settings, "required_scope", "eOverdracht-receiver", raising=False)
+    monkeypatch.setattr(appmod.settings, "session_cookie_secure", False, raising=False)
+    monkeypatch.setattr(appmod.settings, "receiver_organization_ura", "87654321", raising=False)
+    monkeypatch.setattr(appmod.settings, "dezi_client_id", "87654321", raising=False)
+    monkeypatch.setattr(appmod.settings, "dezi_scope", "openid", raising=False)
+    monkeypatch.setattr(appmod.settings, "dezi_callback_path", "/auth/dezi/callback", raising=False)
 
 
 def _task_payload(sender_ura: str = "12345678") -> dict:
@@ -175,3 +182,146 @@ def test_post_task_rejects_when_token_organization_does_not_match_task(monkeypat
 
     assert response.status_code == 403
     assert response.json()["detail"]["reason"] == "organization_not_authorized"
+
+
+def test_ui_state_lists_tasks_and_reports_logged_out_session(monkeypatch):
+    appmod = _import_app_module()
+    _set_settings(monkeypatch, appmod)
+
+    async def _fake_introspect(_token: str):
+        return appmod.TokenContext(
+            raw={},
+            active=True,
+            organization_ura="12345678",
+            scopes=["eOverdracht-receiver"],
+        )
+
+    monkeypatch.setattr(appmod, "_introspect_token", _fake_introspect)
+
+    with TestClient(appmod.app) as client:
+        client.delete("/debug/tasks")
+        create = client.post(
+            "/fhir/Task",
+            json=_task_payload(),
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert create.status_code == 201, create.text
+
+        state = client.get("/ui/state")
+
+    assert state.status_code == 200
+    body = state.json()
+    assert body["dezi"]["logged_in"] is False
+    assert body["service"]["public_root"] == "https://mach2.disyepd.com/receiver-mock"
+    assert len(body["tasks"]) == 1
+    assert body["tasks"][0]["summary"]["authorization_base"] == "auth-123"
+
+
+def test_dezi_login_redirects_with_pkce_state_and_session(monkeypatch):
+    appmod = _import_app_module()
+    _set_settings(monkeypatch, appmod)
+
+    async def _fake_oidc_config():
+        return {
+            "authorization_endpoint": "https://dezi.example/authorize",
+            "token_endpoint": "https://dezi.example/token",
+            "userinfo_endpoint": "https://dezi.example/userinfo",
+            "jwks_uri": "https://dezi.example/jwks",
+            "issuer": "https://dezi.example",
+        }
+
+    monkeypatch.setattr(appmod, "_get_dezi_oidc_configuration", _fake_oidc_config)
+
+    with TestClient(appmod.app) as client:
+        response = client.get("/auth/dezi/login?task_id=task-abc", follow_redirects=False)
+
+        assert response.status_code == 302
+        location = response.headers["location"]
+        parsed = urlparse(location)
+        params = parse_qs(parsed.query)
+        assert parsed.scheme == "https"
+        assert parsed.netloc == "dezi.example"
+        assert parsed.path == "/authorize"
+        assert params["response_type"] == ["code"]
+        assert params["client_id"] == ["87654321"]
+        assert params["redirect_uri"] == ["https://mach2.disyepd.com/receiver-mock/auth/dezi/callback"]
+        assert params["scope"] == ["openid"]
+        assert params["code_challenge_method"] == ["S256"]
+        assert params["state"][0]
+        assert params["nonce"][0]
+        assert params["code_challenge"][0]
+
+        session_id = response.cookies.get(appmod.settings.session_cookie_name)
+        assert session_id
+        session = appmod.app.state.session_store.get(session_id)
+
+    assert session is not None
+    assert session.pending_task_id == "task-abc"
+    assert session.pending_state == params["state"][0]
+    assert session.pending_nonce == params["nonce"][0]
+    assert session.pending_code_verifier
+
+
+def test_ui_pull_uses_dezi_session_and_returns_sender_data(monkeypatch):
+    appmod = _import_app_module()
+    _set_settings(monkeypatch, appmod)
+
+    sender_access_token_calls = []
+
+    async def _fake_discover_sender_endpoints(_sender_ura: str):
+        return {
+            "organization": {"resourceType": "Organization", "id": "org-sender"},
+            "oauth_endpoint": {"address": "https://sender.example/nuts-oauth2/oauth2/00700700"},
+            "bgz_endpoint": {"address": "https://sender.example/notifiedpull/fhir"},
+        }
+
+    async def _fake_request_sender_access_token(*, task, dezi_id_token: str, sender_oauth_endpoint: str):
+        sender_access_token_calls.append(
+            {
+                "task_id": task["id"],
+                "dezi_id_token": dezi_id_token,
+                "sender_oauth_endpoint": sender_oauth_endpoint,
+            }
+        )
+        return {"access_token": "sender-token", "token_type": "Bearer", "scope": "bgz"}
+
+    async def _fake_fetch_sender_path(sender_bgz_base: str, sender_access_token: str, relative_path: str):
+        return {
+            "ok": True,
+            "url": f"{sender_bgz_base.rstrip('/')}/{relative_path}",
+            "status_code": 200,
+            "content_type": "application/fhir+json",
+            "body": {"resourceType": "Bundle", "type": "searchset", "path": relative_path, "token": sender_access_token},
+        }
+
+    monkeypatch.setattr(appmod, "_discover_sender_endpoints", _fake_discover_sender_endpoints)
+    monkeypatch.setattr(appmod, "_request_sender_access_token", _fake_request_sender_access_token)
+    monkeypatch.setattr(appmod, "_fetch_sender_path", _fake_fetch_sender_path)
+
+    with TestClient(appmod.app) as client:
+        client.delete("/debug/tasks")
+        task = _task_payload()
+        task["id"] = "notif-1"
+        stored = appmod.app.state.task_store.save(task)
+        session = appmod.app.state.session_store.create()
+        session.dezi_id_token = "dezi-id-token"
+        session.dezi_identity = {"display_name": "Dr. Demo", "organization_ura": "87654321", "roles": ["01.041"]}
+        appmod.app.state.session_store.save(session)
+        client.cookies.set(appmod.settings.session_cookie_name, session.session_id)
+
+        response = client.post(f"/ui/tasks/{stored.resource['id']}/pull")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["sender"]["sender_oauth_endpoint"] == "https://sender.example/nuts-oauth2/oauth2/00700700"
+    assert body["sender"]["sender_bgz_base"] == "https://mach2.disyepd.com/notifiedpull/fhir"
+    assert body["sender_access_token"]["received"] is True
+    assert body["pulls"]["workflow_task"]["body"]["path"] == "Task/wf-123"
+    assert body["pulls"]["patient"]["body"]["token"] == "sender-token"
+    assert sender_access_token_calls == [
+        {
+            "task_id": "notif-1",
+            "dezi_id_token": "dezi-id-token",
+            "sender_oauth_endpoint": "https://sender.example/nuts-oauth2/oauth2/00700700",
+        }
+    ]

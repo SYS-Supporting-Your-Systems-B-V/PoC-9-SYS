@@ -1,5 +1,6 @@
 fastapi
 httpx
+jwcrypto
 pydantic
 pydantic-settings
 python-dotenv
