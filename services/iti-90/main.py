@@ -499,7 +499,7 @@ async def _request_receiver_access_token(*, mapping: Dict[str, Any], sender_subj
         field_name="nuts_internal_base",
     )
     request_url = (
-        f"{nuts_internal_base.rstrip('/')}/internal/v2/auth/"
+        f"{nuts_internal_base.rstrip('/')}/internal/auth/v2/"
         f"{quote(subject_id, safe='')}/request-service-access-token"
     )
     scope = str(settings.receiver_notification_scope or "").strip() or "eOverdracht-receiver"
